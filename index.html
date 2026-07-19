@@ -53,7 +53,7 @@
               <button class="primary-button large" id="chooseVideo"><span data-icon="upload"></span> Choose video</button>
               <button class="text-button" id="importButton">Import from StreamYard <span>↗</span></button>
             </div>
-            <small>MP4, MOV, M4V, or WebM · current limit 50 MB</small>
+            <small>MP4, MOV, M4V, or WebM · resumable uploads up to 50 GB</small>
           </div>
           <div class="studio-visual"><img src="assets/morning-devotional.png" alt="Bible and coffee overlooking a mountain sunrise"><img class="media-watermark" src="assets/rhm-logo.png" alt="RHM Studios watermark"><div class="visual-overlay"><span>15–30 min</span><span>4 outputs</span></div></div>
         </section>
@@ -86,6 +86,7 @@
 
   <div class="modal" id="uploadModal" aria-hidden="true"><div class="modal-backdrop"></div><div class="modal-card"><button class="modal-close" aria-label="Close">×</button><span class="modal-icon" data-icon="upload"></span><h2>Upload a devotional</h2><p>Drop your StreamYard recording here and we’ll prepare the creative brief before any processing begins.</p><label class="dropzone"><input type="file" id="fileInput" accept="video/*"><strong>Drag & drop your video</strong><span>or click to browse</span><small>MP4, MOV, WebM · up to 4 GB</small></label><div class="modal-fields"><label>Working title<input value="Untitled morning devotional"></label><label>Primary scripture<input placeholder="e.g. Psalm 46:10"></label></div><button class="primary-button full" id="startProject">Create project</button><p class="human-note">Nothing publishes automatically. You’ll approve every output.</p></div></div>
   <div class="toast" id="toast"><span>✓</span><p><strong>Project ready</strong><small>Your devotional has been added to the review queue.</small></p></div>
+  <script src="vendor/tus.min.js"></script>
   <script src="app.js"></script>
   <script src="session.js"></script>
 </body>

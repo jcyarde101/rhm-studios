@@ -35,7 +35,7 @@ scriptureInput.id = 'projectScripture';
 titleInput.maxLength = 200;
 scriptureInput.maxLength = 200;
 fileInput.accept = 'video/mp4,video/quicktime,video/webm,video/x-m4v';
-modal.querySelector('.dropzone small').textContent = 'MP4, MOV, M4V, or WebM - current limit 50 MB';
+modal.querySelector('.dropzone small').textContent = 'MP4, MOV, M4V, or WebM - resumable uploads up to 50 GB';
 startProjectButton.textContent = 'Upload & create project';
 
 const formError = document.createElement('div');
@@ -67,7 +67,8 @@ const uploadMessage = uploadQueue.querySelector('#uploadMessage');
 const cancelUploadButton = uploadQueue.querySelector('#cancelUpload');
 let activeUpload = null;
 let activeProjectId = null;
-let maxUploadBytes = 50 * 1024 * 1024;
+let activeUploadReject = null;
+let maxUploadBytes = 50 * 1024 * 1024 * 1024;
 
 renderIcons();
 
@@ -91,6 +92,7 @@ function escapeHtml(value) {
 function formatBytes(bytes) {
   const value = Number(bytes) || 0;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
@@ -154,7 +156,7 @@ function renderProjects(payload) {
   if (summary) summary.textContent = projects.length ? `${projects.length} project${projects.length === 1 ? '' : 's'} in your private studio.` : 'No uploads yet. Your first project will appear here.';
 
   if (!projects.length) {
-    projectList.innerHTML = `<article class="empty-projects"><img src="assets/rhm-logo.png" alt=""><div><h3>No video projects yet</h3><p>Choose a test video under ${Math.round(maxUploadBytes / 1024 / 1024)} MB. You will see live progress and a clear confirmation.</p></div><button class="primary-button" type="button" data-upload-first>Upload first video</button></article>`;
+    projectList.innerHTML = `<article class="empty-projects"><img src="assets/rhm-logo.png" alt=""><div><h3>No video projects yet</h3><p>Choose a video up to ${formatBytes(maxUploadBytes)}. You will see live progress and a clear confirmation.</p></div><button class="primary-button" type="button" data-upload-first>Upload first video</button></article>`;
     return;
   }
 
@@ -184,7 +186,7 @@ async function loadProjects() {
   try {
     const payload = await apiRequest('/api/projects');
     maxUploadBytes = payload.maxUploadBytes || maxUploadBytes;
-    modal.querySelector('.dropzone small').textContent = `MP4, MOV, M4V, or WebM - current limit ${Math.round(maxUploadBytes / 1024 / 1024)} MB`;
+    modal.querySelector('.dropzone small').textContent = `MP4, MOV, M4V, or WebM - resumable uploads up to ${formatBytes(maxUploadBytes)}`;
     renderProjects(payload);
   } catch (error) {
     projectList.innerHTML = `<article class="empty-projects error-projects"><div><h3>Projects could not be loaded</h3><p>${escapeHtml(error.message)}</p></div><button class="secondary-button" type="button" data-retry-projects>Try again</button></article>`;
@@ -216,29 +218,49 @@ async function markUploadFailed(projectId) {
   await fetch(`/api/projects/${encodeURIComponent(projectId)}/upload-failed`, { method: 'POST' }).catch(() => {});
 }
 
-function uploadToSignedUrl(file, signedUrl, title) {
+function uploadResumable(file, uploadConfig, title) {
   return new Promise((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    activeUpload = request;
-    request.open('PUT', signedUrl);
-    request.setRequestHeader('x-upsert', 'false');
-    request.upload.addEventListener('progress', event => {
-      if (!event.lengthComputable) return;
-      const percent = (event.loaded / event.total) * 100;
-      setUploadStatus({ phase: 'UPLOADING TO PRIVATE STORAGE', title, percent, message: `${formatBytes(event.loaded)} of ${formatBytes(event.total)} uploaded. Keep this tab open.` });
+    activeUploadReject = reject;
+    const upload = new tus.Upload(file, {
+      endpoint: uploadConfig.endpoint,
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      headers: { authorization: `Bearer ${uploadConfig.accessToken}` },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      chunkSize: uploadConfig.chunkSize,
+      fingerprint(selectedFile) {
+        return Promise.resolve(`rhm-${uploadConfig.path}-${selectedFile.name}-${selectedFile.size}-${selectedFile.lastModified}`);
+      },
+      metadata: {
+        bucketName: uploadConfig.bucket,
+        objectName: uploadConfig.path,
+        contentType: file.type || 'application/octet-stream',
+        cacheControl: '3600'
+      },
+      onProgress(bytesUploaded, bytesTotal) {
+        const percent = bytesTotal ? (bytesUploaded / bytesTotal) * 100 : 0;
+        setUploadStatus({ phase: 'UPLOADING TO PRIVATE STORAGE', title, percent, message: `${formatBytes(bytesUploaded)} of ${formatBytes(bytesTotal)} uploaded. Interrupted transfers retry automatically.` });
+      },
+      onSuccess() {
+        activeUploadReject = null;
+        resolve();
+      },
+      onError(error) {
+        activeUploadReject = null;
+        reject(new Error(error?.originalResponse?.getBody?.() || error?.message || 'The resumable upload failed.'));
+      }
     });
-    request.addEventListener('load', () => {
-      if (request.status >= 200 && request.status < 300) return resolve();
-      let message = 'Supabase could not accept the video.';
-      try { message = JSON.parse(request.responseText)?.message || message; } catch {}
-      reject(new Error(message));
-    });
-    request.addEventListener('error', () => reject(new Error('The connection was interrupted during upload.')));
-    request.addEventListener('abort', () => reject(new DOMException('Upload cancelled', 'AbortError')));
-    const body = new FormData();
-    body.append('cacheControl', '3600');
-    body.append('', file);
-    request.send(body);
+    activeUpload = upload;
+
+    upload.findPreviousUploads()
+      .then(previousUploads => {
+        if (previousUploads.length) upload.resumeFromPreviousUpload(previousUploads[0]);
+        upload.start();
+      })
+      .catch(error => {
+        activeUploadReject = null;
+        reject(error);
+      });
   });
 }
 
@@ -248,7 +270,8 @@ async function startUpload() {
   formError.textContent = '';
   if (!file) return void (formError.textContent = 'Choose a video file first.');
   if (!title) return void (formError.textContent = 'Enter a working title.');
-  if (file.size > maxUploadBytes) return void (formError.textContent = `This file is ${formatBytes(file.size)}. Your current Supabase limit is ${Math.round(maxUploadBytes / 1024 / 1024)} MB.`);
+  if (file.size > maxUploadBytes) return void (formError.textContent = `This file is ${formatBytes(file.size)}. Your current upload limit is ${formatBytes(maxUploadBytes)}.`);
+  if (typeof tus === 'undefined') return void (formError.textContent = 'The resumable uploader did not load. Refresh and try again.');
   startProjectButton.disabled = true;
   startProjectButton.textContent = 'Creating secure project...';
   setUploadStatus({ phase: 'PREPARING SECURE UPLOAD', title, percent: 1, message: 'Creating the database record and private storage path.' });
@@ -265,8 +288,8 @@ async function startUpload() {
     });
     activeProjectId = created.project.id;
     closeModal();
-    setUploadStatus({ phase: 'UPLOADING TO PRIVATE STORAGE', title, percent: 2, message: `${formatBytes(file.size)} selected. Keep this tab open while it uploads.` });
-    await uploadToSignedUrl(file, created.upload.signedUrl, title);
+    setUploadStatus({ phase: 'UPLOADING TO PRIVATE STORAGE', title, percent: 2, message: `${formatBytes(file.size)} selected. Interrupted transfers will retry automatically.` });
+    await uploadResumable(file, created.upload, title);
     setUploadStatus({ phase: 'FINALIZING PROJECT', title, percent: 100, message: 'The video arrived. Verifying the file and populating your workspace.' });
     const durationSeconds = await durationPromise;
     const completed = await apiRequest(`/api/projects/${encodeURIComponent(created.project.id)}/complete-upload`, {
@@ -274,6 +297,7 @@ async function startUpload() {
       body: JSON.stringify({ assetId: created.upload.assetId, durationSeconds })
     });
     activeUpload = null;
+    activeUploadReject = null;
     activeProjectId = null;
     setUploadStatus({ phase: 'UPLOAD COMPLETE', title, percent: 100, message: completed.message, state: 'complete' });
     showToast('Video uploaded', 'Your project is now visible and ready for the transcription step.');
@@ -282,6 +306,7 @@ async function startUpload() {
   } catch (error) {
     if (activeProjectId) await markUploadFailed(activeProjectId);
     activeUpload = null;
+    activeUploadReject = null;
     activeProjectId = null;
     if (error?.name === 'AbortError') return;
     setUploadStatus({ phase: 'UPLOAD COULD NOT START', title, percent: 0, message: error.message, state: 'error' });
@@ -302,16 +327,21 @@ fileInput.addEventListener('change', event => {
   const dropzone = modal.querySelector('.dropzone');
   dropzone.querySelector('strong').textContent = file.name;
   dropzone.querySelector('span').textContent = `${formatBytes(file.size)} selected`;
-  formError.textContent = file.size > maxUploadBytes ? `This file exceeds the current ${Math.round(maxUploadBytes / 1024 / 1024)} MB limit.` : '';
+  formError.textContent = file.size > maxUploadBytes ? `This file exceeds the current ${formatBytes(maxUploadBytes)} limit.` : '';
 });
 startProjectButton.addEventListener('click', startUpload);
 
 cancelUploadButton.addEventListener('click', async () => {
   if (!activeUpload) return;
-  activeUpload.abort();
-  await markUploadFailed(activeProjectId);
+  const upload = activeUpload;
+  const projectId = activeProjectId;
+  const rejectUpload = activeUploadReject;
+  await upload.abort(true);
   activeUpload = null;
+  activeUploadReject = null;
   activeProjectId = null;
+  rejectUpload?.(new DOMException('Upload cancelled', 'AbortError'));
+  await markUploadFailed(projectId);
   setUploadStatus({ phase: 'UPLOAD CANCELLED', title: uploadTitle.textContent, percent: 0, message: 'The upload was cancelled. No processing was started.', state: 'error' });
   await loadProjects();
 });

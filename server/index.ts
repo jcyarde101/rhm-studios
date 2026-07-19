@@ -19,6 +19,7 @@ const publicFiles = [
 ];
 for (const file of publicFiles) app.get(`/${file}`, (_req, res) => res.sendFile(path.join(root, file)));
 app.use('/assets', express.static(path.join(root, 'assets'), { dotfiles: 'deny', index: false }));
+app.get('/vendor/tus.min.js', (_req, res) => res.sendFile(path.join(root, 'node_modules', 'tus-js-client', 'dist', 'tus.min.js')));
 
 app.get(['/signin', '/signin.html'], async (req, res) => {
   const supabase = createRequestClient(req, res);
@@ -77,7 +78,13 @@ async function requireUser(req: Request, res: Response, next: NextFunction) {
     if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Your session expired. Please sign in again.' });
     return res.redirect('/signin');
   }
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData.session?.access_token) {
+    if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Your secure upload session expired. Please sign in again.' });
+    return res.redirect('/signin');
+  }
   res.locals.user = data.user;
+  res.locals.accessToken = sessionData.session.access_token;
   next();
 }
 
@@ -88,6 +95,8 @@ app.get('/api/me', requireUser, async (_req, res) => {
 });
 
 const videoBucket = 'devotional-media';
+const projectRef = new URL(config.supabaseUrl).hostname.split('.')[0];
+const resumableUploadEndpoint = `https://${projectRef}.storage.supabase.co/storage/v1/upload/resumable`;
 const allowedVideoTypes = new Set(['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v', 'application/octet-stream']);
 
 function cleanText(value: unknown, maxLength: number) {
@@ -123,6 +132,7 @@ app.get('/api/projects', requireUser, async (_req, res) => {
 });
 
 app.post('/api/projects', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   const ownerId = res.locals.user.id;
   const title = cleanText(req.body?.title, 200);
   const scripture = cleanText(req.body?.scripture, 200) || null;
@@ -168,21 +178,15 @@ app.post('/api/projects', requireUser, async (req, res) => {
     return res.status(500).json({ error: 'The secure media record could not be created.' });
   }
 
-  const { data: signed, error: signedError } = await adminClient.storage
-    .from(videoBucket)
-    .createSignedUploadUrl(storagePath, { upsert: false });
-  if (signedError || !signed?.token || !signed?.signedUrl) {
-    await adminClient.from('devotionals').delete().eq('id', project.id).eq('owner_id', ownerId);
-    return res.status(500).json({ error: 'A secure upload could not be started.' });
-  }
-
   res.status(201).json({
     project,
     upload: {
       assetId: asset.id,
       bucket: videoBucket,
       path: storagePath,
-      signedUrl: signed.signedUrl
+      endpoint: resumableUploadEndpoint,
+      accessToken: res.locals.accessToken,
+      chunkSize: 6 * 1024 * 1024
     }
   });
 });
