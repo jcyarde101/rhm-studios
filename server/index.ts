@@ -362,7 +362,12 @@ app.post('/api/projects/:projectId/upload-failed', requireUser, async (req, res)
   res.status(204).end();
 });
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', auth: 'supabase-google', adminConfigured: config.adminEmails.size > 0 }));
+app.get('/api/health', (_req, res) => res.json({
+  status: 'ok',
+  auth: 'supabase-google',
+  adminConfigured: config.adminEmails.size > 0,
+  integrations: { openaiConfigured: Boolean(config.openaiApiKey) }
+}));
 app.get(['/', '/index.html'], requireUser, (_req, res) => res.sendFile(path.join(root, 'index.html')));
 app.get('/workflow.html', requireUser, (_req, res) => res.sendFile(path.join(root, 'workflow.html')));
 app.get('/library.html', requireUser, (_req, res) => res.sendFile(path.join(root, 'library.html')));

@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import ffmpeg from '@ffmpeg-installer/ffmpeg';
+import { config } from './config.js';
 import { adminClient } from './supabase.js';
 
-const openaiApiKey = process.env.OPENAI_API_KEY?.trim();
+const openaiApiKey = config.openaiApiKey;
 const mediaBucket = 'devotional-media';
 let workerActive = false;
 
@@ -126,6 +127,7 @@ async function processTranscriptionJob(job: any) {
   const ownerId = String(job.owner_id);
   const workDirectory = await mkdtemp(path.join(tmpdir(), 'rhm-transcription-'));
   try {
+    if (!openaiApiKey) throw new Error('OPENAI_API_KEY is not configured.');
     await updateJob(jobId, { status: 'running', progress: 2, started_at: new Date().toISOString(), error_message: null });
     await adminClient.from('devotionals').update({ status: 'processing' }).eq('id', devotionalId);
     const { data: asset, error: assetError } = await adminClient
