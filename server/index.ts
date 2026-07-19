@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { adminClient, createRequestClient } from './supabase.js';
+import { regenerateMessageReview, runQueuedProcessingJobs } from './processing.js';
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -13,7 +14,7 @@ app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 
 const publicFiles = [
-  'styles.css', 'app.js', 'workflow.css', 'workflow-image.css', 'workflow.js',
+  'styles.css', 'app.js', 'workflow.css', 'workflow-image.css', 'workflow-message-review.css', 'workflow.js',
   'library.css', 'library.js', 'rhm-brand.css', 'brand-media.css', 'session.js',
   'auth.css', 'auth.js'
 ];
@@ -131,6 +132,107 @@ app.get('/api/projects', requireUser, async (_req, res) => {
   });
 });
 
+app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }] = await Promise.all([
+    adminClient
+      .from('devotionals')
+      .select('id,title,primary_scripture,recording_date,duration_seconds,status,created_at,media_assets(id,kind,storage_path,size_bytes,mime_type)')
+      .eq('id', projectId)
+      .eq('owner_id', ownerId)
+      .single(),
+    adminClient
+      .from('written_outputs')
+      .select('content,model_provider,updated_at')
+      .eq('devotional_id', projectId)
+      .eq('owner_id', ownerId)
+      .eq('kind', 'transcript')
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    adminClient
+      .from('workflow_stages')
+      .select('status,notes,updated_at')
+      .eq('devotional_id', projectId)
+      .eq('owner_id', ownerId)
+      .eq('stage', 'message')
+      .maybeSingle(),
+    adminClient
+      .from('processing_jobs')
+      .select('id,job_type,status,progress,error_message,created_at,started_at,completed_at')
+      .eq('devotional_id', projectId)
+      .eq('owner_id', ownerId)
+      .order('created_at', { ascending: false })
+  ]);
+  if (projectError || !project) return res.status(404).json({ error: 'This video project could not be found.' });
+
+  const source = (project.media_assets || []).find((asset: any) => asset.kind === 'source_video');
+  let videoUrl: string | null = null;
+  if (source?.storage_path) {
+    const { data: signed } = await adminClient.storage.from(videoBucket).createSignedUrl(source.storage_path, 60 * 60);
+    videoUrl = signed?.signedUrl ?? null;
+  }
+  let messageReview: Record<string, unknown> | null = null;
+  let userDirection = '';
+  if (messageStage?.notes) {
+    try {
+      const notes = JSON.parse(messageStage.notes);
+      messageReview = notes.review ?? null;
+      userDirection = typeof notes.userDirection === 'string' ? notes.userDirection : '';
+    } catch {}
+  }
+  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [] });
+});
+
+app.post('/api/projects/:projectId/message-review', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const userDirection = cleanText(req.body?.userDirection, 4000);
+  if (!userDirection) return res.status(400).json({ error: 'Explain what you intended the message to convey.' });
+  const [{ data: project }, { data: transcript }] = await Promise.all([
+    adminClient.from('devotionals').select('id').eq('id', projectId).eq('owner_id', ownerId).maybeSingle(),
+    adminClient.from('written_outputs').select('content').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('kind', 'transcript').order('version', { ascending: false }).limit(1).maybeSingle()
+  ]);
+  if (!project) return res.status(404).json({ error: 'This video project could not be found.' });
+  if (!transcript?.content) return res.status(409).json({ error: 'The transcript is still processing. You can redirect the review as soon as it is ready.' });
+  try {
+    const review = await regenerateMessageReview(projectId, ownerId, transcript.content, userDirection);
+    res.json({ review, userDirection, message: 'AI reviewed the transcript again using your clarification.' });
+  } catch (error: any) {
+    console.error('Message review regeneration failed', { projectId, message: error?.message });
+    res.status(502).json({ error: 'AI could not refresh the message review. Please try again.' });
+  }
+});
+
+app.post('/api/projects/:projectId/retry-processing', requireUser, async (req, res) => {
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const { data: job } = await adminClient
+    .from('processing_jobs')
+    .select('id,status,attempts')
+    .eq('devotional_id', projectId)
+    .eq('owner_id', ownerId)
+    .eq('job_type', 'transcription')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!job) return res.status(404).json({ error: 'No transcription job was found for this project.' });
+  if (job.status === 'running' || job.status === 'queued') return res.json({ message: 'Transcription is already processing.' });
+  await adminClient.from('processing_jobs').update({
+    status: 'queued',
+    progress: 0,
+    error_message: null,
+    started_at: null,
+    completed_at: null,
+    attempts: (job.attempts ?? 0) + 1
+  }).eq('id', job.id).eq('owner_id', ownerId);
+  if (config.processingWorkerEnabled) void runQueuedProcessingJobs();
+  res.json({ message: 'Transcription has been queued again.' });
+});
+
 app.post('/api/projects', requireUser, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const ownerId = res.locals.user.id;
@@ -245,6 +347,8 @@ app.post('/api/projects/:projectId/complete-upload', requireUser, async (req, re
     });
   }
 
+  if (config.processingWorkerEnabled) void runQueuedProcessingJobs();
+
   res.json({ project, message: 'Upload complete. The project is ready for transcription.' });
 });
 
@@ -264,4 +368,10 @@ app.get('/workflow.html', requireUser, (_req, res) => res.sendFile(path.join(roo
 app.get('/library.html', requireUser, (_req, res) => res.sendFile(path.join(root, 'library.html')));
 
 app.use((_req, res) => res.status(404).send('Not found'));
-app.listen(config.port, () => console.log(`RHM Studios running at ${config.appUrl}`));
+app.listen(config.port, () => {
+  console.log(`RHM Studios running at ${config.appUrl}`);
+  if (config.processingWorkerEnabled) {
+    setTimeout(() => void runQueuedProcessingJobs(), 1500);
+    setInterval(() => void runQueuedProcessingJobs(), 60_000).unref();
+  }
+});

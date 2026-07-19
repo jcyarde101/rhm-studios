@@ -7,6 +7,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="workflow.css">
   <link rel="stylesheet" href="workflow-image.css">
+  <link rel="stylesheet" href="workflow-message-review.css">
   <link rel="stylesheet" href="rhm-brand.css">
   <link rel="stylesheet" href="brand-media.css">
 </head>
@@ -32,6 +33,25 @@
           <div class="player-card"><div class="video"><img src="assets/morning-devotional.png" alt="Video preview"><img class="rhm-watermark" src="assets/rhm-logo.png" alt="RHM Studios watermark"><button class="play">▶</button><span class="quality">PREVIEW · 540P</span><div class="scripture-preview"><small>ISAIAH 40:31</small><strong>“Those who hope in the Lord<br>will renew their strength.”</strong></div></div><div class="timeline"><span>08:42</span><div><i></i><b style="left:36%"></b><b style="left:63%"></b><b style="left:81%"></b></div><span>24:18</span></div><div class="player-note"><span>✦</span><p><strong>Fast-start preview</strong><small>Audio cleanup and transcript are ready. Color, B-roll, and full-resolution rendering happen after your direction.</small></p></div></div>
           <div class="transcript-card"><div class="card-head"><div><strong>Transcript</strong><small>Click any paragraph to jump to that moment.</small></div><button>Find text ⌕</button></div><div class="transcript"><p data-time="00:00"><time>00:00</time><span>Good morning, family. Today I want to talk about what happens when we find ourselves waiting on God.</span></p><p data-time="03:14"><time>03:14</time><span>Waiting is not wasted time. It is often the place where faith is strengthened and our hearts learn to trust what our eyes cannot yet see.</span></p><p class="selected" data-time="08:42"><time>08:42</time><span>Isaiah reminds us that those who hope in the Lord will renew their strength. Not those who have every answer—those who hope.</span></p><p data-time="14:06"><time>14:06</time><span>Maybe your prayer has not been answered in the way you expected. God has not forgotten you in the waiting.</span></p><p data-time="20:31"><time>20:31</time><span>Let us pray together. Father, help us trust your timing when the road ahead is not clear.</span></p></div><button class="outline-button full">Edit full transcript</button></div>
         </div>
+        <section class="ai-message-review" id="messageReviewPanel" data-state="loading" aria-live="polite">
+          <div class="message-review-head">
+            <div><span>AI MESSAGE CHECK</span><h2>Is the message coming through the way you intended?</h2><p>AI reviews the transcript as a listener, then you correct or redirect its understanding before any writing, clips, or edits are created.</p></div>
+            <span class="message-review-status" id="messageReviewStatus">ANALYZING</span>
+          </div>
+          <div class="message-review-loading" id="messageReviewLoading"><span class="review-spinner"></span><div><strong id="messageReviewLoadingTitle">Preparing your transcript and message review</strong><p id="messageReviewLoadingCopy">This panel will fill in automatically. You may leave this workspace and return later.</p></div><b id="messageReviewProgress">0%</b></div>
+          <div class="message-review-error" id="messageReviewError" hidden><strong>The message review needs attention</strong><p id="messageReviewErrorCopy"></p><button class="outline-button" id="retryMessageProcessing" type="button">Retry processing</button></div>
+          <div class="message-review-content" id="messageReviewContent" hidden>
+            <div class="synopsis-block"><span>OVERALL SYNOPSIS</span><p id="overallSynopsis"></p><div><strong>Central message AI heard</strong><p id="centralMessage"></p></div></div>
+            <div class="message-findings">
+              <article class="finding-good"><span>THE GOOD</span><h3>What came through clearly</h3><ul id="whatWorked"></ul></article>
+              <article class="finding-clarity"><span>NEEDS CLARITY</span><h3>What may need sharpening</h3><ul id="needsClarity"></ul></article>
+              <article class="finding-concern"><span>WATCH CLOSELY</span><h3>What could be misunderstood</h3><ul id="possibleConcerns"></ul></article>
+            </div>
+            <div class="review-details"><div><span>SCRIPTURES AI HEARD</span><div id="scripturesDetected" class="scripture-tags"></div></div><div><span>SUGGESTED EMPHASIS</span><p id="suggestedEmphasis"></p></div></div>
+            <div class="creator-redirect"><div><label for="aiCorrection">Is AI on the right track?</label><small>If not, explain what you meant. AI will reread the transcript using your correction while keeping your voice and intent central.</small></div><textarea id="aiCorrection" placeholder="Example: The main point is not that hardship disappears. I want the audience to understand that worship remains our response no matter what happens."></textarea><button class="gold-button" id="refreshMessageReview" type="button">Save direction & re-check</button><p id="messageReviewFormError" role="alert"></p></div>
+            <p class="ai-review-note">AI offers an editorial reading, not a final judgment. You decide what the devotional means and what moves forward.</p>
+          </div>
+        </section>
         <div class="direction-box"><div><label>What should this devotional emphasize?</label><small>Your direction guides the video edit, writing, graphics, and clip selection.</small></div><textarea id="messageDirection">Emphasize that waiting is active trust, not wasted time. Keep the tone hopeful and reassuring. Isaiah 40:31 is the central scripture.</textarea><div class="tone-row"><span>Overall tone</span><button class="chip selected">Hopeful</button><button class="chip">Reflective</button><button class="chip">Encouraging</button><button class="chip">Teaching</button></div></div>
         <div class="approval-bar"><div><span>YOUR APPROVAL</span><p><strong>Does the transcript and message direction feel right?</strong><small>You can return and change this later.</small></p></div><button class="outline-button">Request changes</button><button class="approve-button" data-approve="1">Approve & continue →</button></div>
       </section>

@@ -27,3 +27,222 @@ document.getElementById('approveIntro')?.addEventListener('click',e=>{e.currentT
 document.getElementById('replaceIntro')?.addEventListener('click',()=>notify('Brand media library','Additional intros will appear here as you add them.'));
 document.getElementById('approveOutro')?.addEventListener('click',e=>{e.currentTarget.textContent='✓ Outro approved';notify('Outro approved','This outro will be included in the full edit unless you disable it.')});
 document.getElementById('replaceOutro')?.addEventListener('click',()=>notify('Brand media library','Additional outros will appear here as you add them.'));
+
+const workspaceProjectId = new URLSearchParams(window.location.search).get('project');
+let workspacePoll = null;
+let directionInitialized = false;
+
+async function workspaceRequest(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+  });
+  if (response.status === 401) {
+    window.location.href = '/signin';
+    throw new Error('Your session expired. Please sign in again.');
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'The workspace could not be updated.');
+  return data;
+}
+
+function formatWorkspaceTime(totalSeconds) {
+  const seconds = Math.max(0, Number(totalSeconds) || 0);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = Math.floor(seconds % 60);
+  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}` : `${minutes}:${String(remainder).padStart(2, '0')}`;
+}
+
+function transcriptParagraphs(transcript) {
+  const sections = String(transcript || '').split(/(?=\[\d{2}:\d{2}:\d{2}\]\s*)/).filter(Boolean);
+  return sections.flatMap(section => {
+    const match = section.match(/^\[(\d{2}):(\d{2}):(\d{2})\]\s*([\s\S]*)$/);
+    const time = match ? `${match[1]}:${match[2]}:${match[3]}` : '00:00:00';
+    const text = (match ? match[4] : section).trim();
+    return text ? [{ time, text }] : [];
+  });
+}
+
+function renderTranscript(transcript) {
+  const transcriptElement = document.querySelector('.transcript');
+  if (!transcriptElement) return;
+  if (!transcript) {
+    transcriptElement.innerHTML = '<p><time>--:--</time><span>Your real transcript will appear here as processing completes.</span></p>';
+    return;
+  }
+  transcriptElement.innerHTML = '';
+  transcriptParagraphs(transcript).forEach((section, index) => {
+    const paragraph = document.createElement('p');
+    paragraph.dataset.time = section.time;
+    if (index === 0) paragraph.classList.add('selected');
+    const time = document.createElement('time');
+    time.textContent = section.time.replace(/^00:/, '');
+    const copy = document.createElement('span');
+    copy.textContent = section.text;
+    paragraph.append(time, copy);
+    transcriptElement.append(paragraph);
+  });
+}
+
+function fillList(id, items, emptyMessage) {
+  const list = document.getElementById(id);
+  list.innerHTML = '';
+  const values = Array.isArray(items) && items.length ? items : [emptyMessage];
+  values.forEach(item => {
+    const entry = document.createElement('li');
+    entry.textContent = item;
+    list.append(entry);
+  });
+}
+
+function renderMessageReview(review, userDirection) {
+  const panel = document.getElementById('messageReviewPanel');
+  panel.dataset.state = 'ready';
+  document.getElementById('messageReviewStatus').textContent = 'READY FOR YOUR REVIEW';
+  document.getElementById('messageReviewLoading').hidden = true;
+  document.getElementById('messageReviewError').hidden = true;
+  document.getElementById('messageReviewContent').hidden = false;
+  document.getElementById('overallSynopsis').textContent = review.overallSynopsis || 'No synopsis was returned.';
+  document.getElementById('centralMessage').textContent = review.centralMessage || 'No central message was identified.';
+  fillList('whatWorked', review.whatWorked, 'AI did not identify a specific strength yet.');
+  fillList('needsClarity', review.needsClarity, 'AI did not flag anything as unclear.');
+  fillList('possibleConcerns', review.possibleConcerns, 'AI did not flag a likely misunderstanding.');
+  document.getElementById('suggestedEmphasis').textContent = review.suggestedEmphasis || 'Use your own direction below.';
+  const scriptures = document.getElementById('scripturesDetected');
+  scriptures.innerHTML = '';
+  (review.scripturesDetected?.length ? review.scripturesDetected : ['None identified']).forEach(reference => {
+    const tag = document.createElement('i');
+    tag.textContent = reference;
+    scriptures.append(tag);
+  });
+  if (!directionInitialized) {
+    document.getElementById('aiCorrection').value = userDirection || '';
+    document.getElementById('messageDirection').value = userDirection || review.suggestedEmphasis || '';
+    directionInitialized = true;
+  }
+}
+
+function renderProcessingState(job) {
+  const panel = document.getElementById('messageReviewPanel');
+  const progress = Math.max(0, Math.min(100, Number(job?.progress) || 0));
+  panel.dataset.state = job?.status === 'failed' ? 'error' : 'loading';
+  document.getElementById('messageReviewContent').hidden = true;
+  document.getElementById('messageReviewLoading').hidden = job?.status === 'failed';
+  document.getElementById('messageReviewError').hidden = job?.status !== 'failed';
+  document.getElementById('messageReviewProgress').textContent = `${progress}%`;
+  const status = job?.status || 'queued';
+  document.getElementById('messageReviewStatus').textContent = status === 'running' ? 'TRANSCRIBING' : status === 'failed' ? 'NEEDS ATTENTION' : 'QUEUED';
+  document.getElementById('messageReviewLoadingTitle').textContent = status === 'running' ? 'Listening carefully and preparing the AI message review' : 'Your transcript is in the processing queue';
+  document.getElementById('messageReviewLoadingCopy').textContent = status === 'running' ? 'Audio is being transcribed in sections. The synopsis will appear automatically when the complete message is ready.' : 'Processing will begin automatically. You may leave this workspace and return later.';
+  if (status === 'failed') document.getElementById('messageReviewErrorCopy').textContent = job.error_message || 'The transcript could not be completed. Retry when you are ready.';
+  const sidebar = document.querySelector('.processing-card');
+  sidebar?.querySelector('em') && (sidebar.querySelector('em').textContent = `${progress}%`);
+  sidebar?.querySelector('.meter i')?.style.setProperty('width', `${progress}%`);
+  const badge = document.querySelector('[data-panel="1"] .ready-badge');
+  if (badge) badge.textContent = status === 'running' ? `TRANSCRIPT ${progress}%` : status === 'failed' ? 'PROCESSING PAUSED' : 'TRANSCRIPT QUEUED';
+}
+
+function attachRealVideo(videoUrl) {
+  if (!videoUrl || document.getElementById('projectVideo')) return;
+  const frame = document.querySelector('.player-card .video');
+  const poster = frame?.querySelector(':scope > img:not(.rhm-watermark)');
+  if (!frame || !poster) return;
+  const video = document.createElement('video');
+  video.id = 'projectVideo';
+  video.controls = true;
+  video.preload = 'metadata';
+  video.src = videoUrl;
+  poster.replaceWith(video);
+  frame.querySelector('.play')?.remove();
+  frame.querySelector('.scripture-preview')?.remove();
+  const quality = frame.querySelector('.quality');
+  if (quality) quality.textContent = 'PRIVATE SOURCE VIDEO';
+}
+
+function renderWorkspace(data) {
+  document.title = `${data.project.title} · RHM Studios`;
+  const headerTitle = document.querySelector('.project-name strong');
+  if (headerTitle) headerTitle.textContent = data.project.title;
+  const headerStatus = document.querySelector('.project-name small');
+  if (headerStatus) headerStatus.textContent = data.project.status === 'review' ? 'AI message review ready' : 'Processing your private upload';
+  attachRealVideo(data.videoUrl);
+  renderTranscript(data.transcript);
+  const duration = document.querySelector('.timeline > span:last-child');
+  if (duration) duration.textContent = formatWorkspaceTime(data.project.duration_seconds);
+  const job = (data.jobs || []).find(item => item.job_type === 'transcription');
+  if (data.messageReview) renderMessageReview(data.messageReview, data.userDirection);
+  else renderProcessingState(job);
+  const shouldPoll = !data.messageReview && (!job || job.status === 'queued' || job.status === 'running');
+  if (shouldPoll && !workspacePoll) workspacePoll = window.setInterval(loadRealWorkspace, 8000);
+  if (!shouldPoll && workspacePoll) {
+    window.clearInterval(workspacePoll);
+    workspacePoll = null;
+  }
+}
+
+async function loadRealWorkspace() {
+  if (!workspaceProjectId) {
+    document.getElementById('messageReviewLoading').hidden = true;
+    document.getElementById('messageReviewError').hidden = false;
+    document.getElementById('messageReviewErrorCopy').textContent = 'Open a video project from the RHM Studios home page.';
+    return;
+  }
+  try {
+    renderWorkspace(await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/workspace`));
+  } catch (error) {
+    document.getElementById('messageReviewLoading').hidden = true;
+    document.getElementById('messageReviewError').hidden = false;
+    document.getElementById('messageReviewErrorCopy').textContent = error.message;
+  }
+}
+
+document.querySelector('.transcript')?.addEventListener('click', event => {
+  const paragraph = event.target.closest('p[data-time]');
+  if (!paragraph) return;
+  document.querySelectorAll('.transcript p').forEach(item => item.classList.remove('selected'));
+  paragraph.classList.add('selected');
+  const parts = paragraph.dataset.time.split(':').map(Number);
+  const seconds = parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+  const video = document.getElementById('projectVideo');
+  if (video && Number.isFinite(seconds)) video.currentTime = seconds;
+  const currentTime = document.querySelector('.timeline > span:first-child');
+  if (currentTime) currentTime.textContent = paragraph.dataset.time.replace(/^00:/, '');
+});
+
+document.getElementById('refreshMessageReview')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const correction = document.getElementById('aiCorrection').value.trim();
+  const error = document.getElementById('messageReviewFormError');
+  error.textContent = '';
+  if (!correction) return void (error.textContent = 'Tell AI what you intended before asking it to re-check the message.');
+  button.disabled = true;
+  button.textContent = 'Re-checking transcript...';
+  try {
+    const result = await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/message-review`, { method: 'POST', body: JSON.stringify({ userDirection: correction }) });
+    directionInitialized = false;
+    renderMessageReview(result.review, result.userDirection);
+    notify('Message review updated', 'AI reread the transcript using your correction.');
+  } catch (requestError) {
+    error.textContent = requestError.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Save direction & re-check';
+  }
+});
+
+document.getElementById('retryMessageProcessing')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/retry-processing`, { method: 'POST' });
+    notify('Processing restarted', 'RHM Studios is preparing the transcript again.');
+    await loadRealWorkspace();
+  } catch (error) {
+    document.getElementById('messageReviewErrorCopy').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+loadRealWorkspace();
