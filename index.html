@@ -17,8 +17,8 @@
       <nav>
         <p class="eyebrow">Workspace</p>
         <a class="nav-item active" href="#"><span data-icon="home"></span>Home</a>
-        <a class="nav-item" href="#library"><span data-icon="library"></span>Video projects <b>0</b></a>
-        <a class="nav-item" href="#clips"><span data-icon="clips"></span>Clips <b>0</b></a>
+        <a class="nav-item" href="#library"><span data-icon="library"></span>Video projects <b id="projectCount">0</b></a>
+        <a class="nav-item" href="#clips"><span data-icon="clips"></span>Clips <b id="clipCount">0</b></a>
         <p class="eyebrow integrations-label">Content</p>
         <a class="nav-item" href="library.html"><span data-icon="book"></span>Library & books</a>
       </nav>
@@ -38,7 +38,7 @@
       </header>
 
       <section class="content">
-        <div class="prototype-notice"><span>FOUNDATION BUILD</span><p><strong>The workspace UI is ready.</strong> Media processing will become available when the server-side services are configured.</p></div>
+        <div class="prototype-notice"><span>UPLOADS LIVE</span><p><strong>Your video is stored privately.</strong> Upload progress is shown here, and every AI processing stage will wait for your approval.</p></div>
         <div class="welcome-row">
           <div><p class="date">SUNDAY, JULY 19</p><h1>Good morning, Jordan.</h1><p>Turn today’s message into something worth sharing.</p></div>
           <div class="verse"><span>“</span><p>His mercies are new every morning.</p><small>LAMENTATIONS 3:23</small></div>
@@ -53,14 +53,14 @@
               <button class="primary-button large" id="chooseVideo"><span data-icon="upload"></span> Choose video</button>
               <button class="text-button" id="importButton">Import from StreamYard <span>↗</span></button>
             </div>
-            <small>MP4, MOV, or WebM · up to 4 GB</small>
+            <small>MP4, MOV, M4V, or WebM · current limit 50 MB</small>
           </div>
           <div class="studio-visual"><img src="assets/morning-devotional.png" alt="Bible and coffee overlooking a mountain sunrise"><img class="media-watermark" src="assets/rhm-logo.png" alt="RHM Studios watermark"><div class="visual-overlay"><span>15–30 min</span><span>4 outputs</span></div></div>
         </section>
 
-        <div class="section-heading"><div><h3>Continue creating</h3><p>Your latest devotional is ready for review.</p></div><a href="#library">View all devotionals <span>→</span></a></div>
+        <div class="section-heading"><div><h3>Your video projects</h3><p id="projectSummary">Loading your private projects...</p></div><a href="#library">View all devotionals <span>→</span></a></div>
 
-        <section class="project-card" id="library">
+        <section class="project-list" id="library" aria-live="polite">
           <div class="video-thumb"><img src="assets/morning-devotional.png" alt="Morning devotional thumbnail"><img class="media-watermark" src="assets/rhm-logo.png" alt="RHM Studios watermark"><button aria-label="Play">▶</button><span>24:18</span></div>
           <div class="project-info">
             <div class="project-top"><div><span class="review-pill">REVIEW NEEDED</span><h3>Finding Peace in the Waiting</h3><p>Uploaded today at 7:42 AM</p></div><button class="more">•••</button></div>
@@ -75,9 +75,9 @@
         </section>
 
         <section class="output-grid" id="clips">
-          <article><div class="output-icon peach"><span data-icon="clips"></span></div><div><h4>3 social clips</h4><p>Vertical, captioned, and sized for Shorts, Reels, and TikTok.</p></div><button>Review <span>→</span></button></article>
+          <article><div class="output-icon peach"><span data-icon="clips"></span></div><div><h4>Social clips</h4><p>Vertical, captioned, and sized for Shorts, Reels, and TikTok.</p></div><button>Review <span>→</span></button></article>
           <article><div class="output-icon green"><span data-icon="writing"></span></div><div><h4>Devotional & prayer</h4><p>A short description, full reflection, scriptures, and renewed prayer.</p></div><button>Review <span>→</span></button></article>
-          <article><div class="output-icon purple"><span data-icon="image"></span></div><div><h4>4 supporting graphics</h4><p>Title card, scripture visual, quote card, and thumbnail.</p></div><button>Review <span>→</span></button></article>
+          <article><div class="output-icon purple"><span data-icon="image"></span></div><div><h4>Supporting graphics</h4><p>Title card, scripture visual, quote card, and thumbnail.</p></div><button>Review <span>→</span></button></article>
         </section>
 
       </section>
