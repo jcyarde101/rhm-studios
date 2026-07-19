@@ -1,0 +1,2 @@
+const errors={oauth_start:'Google sign-in could not start. Check the Supabase provider configuration.',missing_code:'Google did not return an authorization code.',exchange_failed:'The secure sign-in exchange failed. Please try again.',profile_setup:'You signed in, but your RHM profile could not be created. The admin migration may still need to be applied.'};
+const code=new URLSearchParams(location.search).get('error');if(code){const box=document.getElementById('authError');box.textContent=errors[code]||'Sign-in was not completed. Please try again.';box.classList.add('show')}

@@ -1,0 +1,4 @@
+document.querySelectorAll('[data-view]').forEach(tab=>tab.addEventListener('click',()=>{document.querySelectorAll('[data-view]').forEach(t=>t.classList.remove('active'));document.querySelectorAll('[data-panel]').forEach(p=>p.classList.remove('active'));tab.classList.add('active');document.querySelector(`[data-panel="${tab.dataset.view}"]`).classList.add('active')}));
+document.getElementById('themeToggle').addEventListener('click',()=>{document.body.classList.toggle('dark');localStorage.setItem('hm-theme',document.body.classList.contains('dark')?'dark':'light')});
+if(localStorage.getItem('hm-theme')==='dark')document.body.classList.add('dark');
+document.getElementById('search').addEventListener('input',e=>{const query=e.target.value.toLowerCase();document.querySelectorAll('.entry').forEach(card=>card.style.display=card.textContent.toLowerCase().includes(query)?'block':'none')});

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RHM Studios</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="rhm-brand.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#"><img class="brand-logo" src="assets/rhm-logo.png" alt="RHM"><span>RHM Studios</span></a>
+      <nav>
+        <p class="eyebrow">Workspace</p>
+        <a class="nav-item active" href="#"><span data-icon="home"></span>Home</a>
+        <a class="nav-item" href="#library"><span data-icon="library"></span>Video projects <b>12</b></a>
+        <a class="nav-item" href="#clips"><span data-icon="clips"></span>Clips <b>36</b></a>
+        <p class="eyebrow integrations-label">Content</p>
+        <a class="nav-item" href="library.html"><span data-icon="book"></span>Library & books</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <button class="profile"><span>RHM</span><span><strong data-user-name>RHM Creator</strong><small data-user-role>Administrator</small></span><i>•••</i></button>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <button class="mobile-menu" aria-label="Menu">☰</button>
+        <div></div>
+        <button class="icon-button" id="themeToggle" aria-label="Toggle dark mode"><span data-icon="moon"></span></button>
+        <button class="icon-button notification" aria-label="Notifications"><span data-icon="bell"></span></button>
+        <button class="icon-button" data-signout aria-label="Sign out" title="Sign out">↪</button>
+        <button class="primary-button" id="newUpload"><span>＋</span> New devotional</button>
+      </header>
+
+      <section class="content">
+        <div class="prototype-notice"><span>FOUNDATION BUILD</span><p><strong>The workspace UI is ready.</strong> Media processing will become available when the server-side services are configured.</p></div>
+        <div class="welcome-row">
+          <div><p class="date">SUNDAY, JULY 19</p><h1>Good morning, Jordan.</h1><p>Turn today’s message into something worth sharing.</p></div>
+          <div class="verse"><span>“</span><p>His mercies are new every morning.</p><small>LAMENTATIONS 3:23</small></div>
+        </div>
+
+        <section class="studio-card">
+          <div class="studio-copy">
+            <span class="status-pill"><i></i> READY TO CREATE</span>
+            <h2>Start with today’s recording</h2>
+            <p>Upload your StreamYard recording. RHM Studios will prepare the full video, social clips, devotional, and prayer—then wait for your review.</p>
+            <div class="upload-actions">
+              <button class="primary-button large" id="chooseVideo"><span data-icon="upload"></span> Choose video</button>
+              <button class="text-button" id="importButton">Import from StreamYard <span>↗</span></button>
+            </div>
+            <small>MP4, MOV, or WebM · up to 4 GB</small>
+          </div>
+          <div class="studio-visual"><img src="assets/morning-devotional.png" alt="Bible and coffee overlooking a mountain sunrise"><img class="media-watermark" src="assets/rhm-logo.png" alt="RHM Studios watermark"><div class="visual-overlay"><span>15–30 min</span><span>4 outputs</span></div></div>
+        </section>
+
+        <div class="section-heading"><div><h3>Continue creating</h3><p>Your latest devotional is ready for review.</p></div><a href="#library">View all devotionals <span>→</span></a></div>
+
+        <section class="project-card" id="library">
+          <div class="video-thumb"><img src="assets/morning-devotional.png" alt="Morning devotional thumbnail"><img class="media-watermark" src="assets/rhm-logo.png" alt="RHM Studios watermark"><button aria-label="Play">▶</button><span>24:18</span></div>
+          <div class="project-info">
+            <div class="project-top"><div><span class="review-pill">REVIEW NEEDED</span><h3>Finding Peace in the Waiting</h3><p>Uploaded today at 7:42 AM</p></div><button class="more">•••</button></div>
+            <div class="pipeline">
+              <div class="pipeline-step done"><span>✓</span><p><strong>Video</strong><small>Enhanced</small></p></div>
+              <i></i><div class="pipeline-step review"><span>3</span><p><strong>Clips</strong><small>Review</small></p></div>
+              <i></i><div class="pipeline-step review"><span>✦</span><p><strong>Writing</strong><small>Review</small></p></div>
+              <i></i><div class="pipeline-step"><span>↗</span><p><strong>Publish</strong><small>Waiting</small></p></div>
+            </div>
+            <div class="project-actions"><button class="primary-button" id="reviewButton">Review & edit</button><button class="secondary-button">Preview video</button></div>
+          </div>
+        </section>
+
+        <section class="output-grid" id="clips">
+          <article><div class="output-icon peach"><span data-icon="clips"></span></div><div><h4>3 social clips</h4><p>Vertical, captioned, and sized for Shorts, Reels, and TikTok.</p></div><button>Review <span>→</span></button></article>
+          <article><div class="output-icon green"><span data-icon="writing"></span></div><div><h4>Devotional & prayer</h4><p>A short description, full reflection, scriptures, and renewed prayer.</p></div><button>Review <span>→</span></button></article>
+          <article><div class="output-icon purple"><span data-icon="image"></span></div><div><h4>4 supporting graphics</h4><p>Title card, scripture visual, quote card, and thumbnail.</p></div><button>Review <span>→</span></button></article>
+        </section>
+
+      </section>
+    </main>
+  </div>
+
+  <div class="modal" id="uploadModal" aria-hidden="true"><div class="modal-backdrop"></div><div class="modal-card"><button class="modal-close" aria-label="Close">×</button><span class="modal-icon" data-icon="upload"></span><h2>Upload a devotional</h2><p>Drop your StreamYard recording here and we’ll prepare the creative brief before any processing begins.</p><label class="dropzone"><input type="file" id="fileInput" accept="video/*"><strong>Drag & drop your video</strong><span>or click to browse</span><small>MP4, MOV, WebM · up to 4 GB</small></label><div class="modal-fields"><label>Working title<input value="Untitled morning devotional"></label><label>Primary scripture<input placeholder="e.g. Psalm 46:10"></label></div><button class="primary-button full" id="startProject">Create project</button><p class="human-note">Nothing publishes automatically. You’ll approve every output.</p></div></div>
+  <div class="toast" id="toast"><span>✓</span><p><strong>Project ready</strong><small>Your devotional has been added to the review queue.</small></p></div>
+  <script src="app.js"></script>
+  <script src="session.js"></script>
+</body>
+</html>

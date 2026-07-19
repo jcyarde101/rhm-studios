@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "rhm-morning-devotional-intro-v1",
+      "division": "studios",
+      "type": "intro",
+      "name": "Morning Devotional Intro",
+      "path": "assets/brand/intros/morning-devotional-intro.mp4",
+      "original_filename": "Morning Devotional Intro (2).mp4",
+      "duration_seconds": 47,
+      "size_bytes": 7066332,
+      "default": true,
+      "requires_review": true,
+      "notes": "Preserve original. Validate codec, dimensions, frame rate, and audio before production rendering."
+    },
+    {
+      "id": "rhm-default-outro-v1",
+      "division": "studios",
+      "type": "outro",
+      "name": "RHM Default Outro",
+      "path": "assets/brand/outros/rhm-default-outro.mp4",
+      "original_filename": "Music Video (1).mp4",
+      "duration_seconds": 35,
+      "size_bytes": 20707673,
+      "default": true,
+      "requires_review": true,
+      "notes": "Preserve original. Validate codec, dimensions, frame rate, and audio before production rendering."
+    }
+  ]
+}

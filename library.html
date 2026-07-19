@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Library & Books · RHM Publications</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="library.css">
+  <link rel="stylesheet" href="rhm-brand.css">
+</head>
+<body>
+  <aside>
+    <a class="brand" href="index.html"><img src="assets/rhm-logo.png" alt="RHM"><strong>RHM Publications</strong></a>
+    <nav><small>STUDIO</small><a href="index.html">▣ Video workspace</a><a href="workflow.html">▷ Current production</a><small>CONTENT</small><a class="active" href="library.html">▤ Devotional library</a><a href="#books">▥ Books & collections</a></nav>
+    <div class="side-note"><strong>Separate by design</strong><p>Only approved writing enters this library. Video production stays in the Studio.</p></div>
+  </aside>
+  <main>
+    <header><div><span>RHM PUBLICATIONS · CONTENT LIBRARY</span><h1>Devotionals, prayers & books</h1><p>Organize approved writing separately from RHM Studios video production.</p></div><div class="header-actions"><button data-signout>Sign out</button><button id="themeToggle" title="Toggle dark mode">◐</button><button class="primary">＋ New collection</button></div></header>
+    <div class="tabs"><button class="active" data-view="devotionals">Devotionals <b>12</b></button><button data-view="prayers">Prayers <b>12</b></button><button data-view="scriptures">Scripture index <b>28</b></button><button data-view="books">Books <b>1</b></button></div>
+
+    <section class="view active" data-panel="devotionals">
+      <div class="toolbar"><label>⌕ <input id="search" placeholder="Search approved devotionals"></label><button>All themes⌄</button><button>Newest first⌄</button></div>
+      <div class="content-grid">
+        <article class="entry featured"><div class="entry-image"><img src="assets/morning-devotional.png" alt="Sunrise"><span>APPROVED</span></div><div class="entry-body"><small>ISAIAH 40:31 · WAITING</small><h2>Finding Peace in the Waiting</h2><p>Waiting on God is not wasted time. In the quiet space between prayer and answer, faith takes root and trust grows stronger.</p><div class="entry-meta"><span>Devotional</span><span>Prayer</span><span>3 scriptures</span></div><footer><time>July 19, 2026</time><button>Open entry →</button></footer></div></article>
+        <article class="entry"><div class="entry-image gradient-one"><span>APPROVED</span><b>GRACE FOR<br>TODAY</b></div><div class="entry-body"><small>2 CORINTHIANS 12:9 · GRACE</small><h2>Strength in Our Weakness</h2><p>Grace does not wait for us to become strong. It meets us where our own strength ends.</p><div class="entry-meta"><span>Devotional</span><span>Prayer</span></div><footer><time>July 18, 2026</time><button>Open entry →</button></footer></div></article>
+        <article class="entry"><div class="entry-image gradient-two"><span>APPROVED</span><b>PEACE IN<br>THE STORM</b></div><div class="entry-body"><small>MARK 4:39 · PEACE</small><h2>When the Winds Rise</h2><p>The storm may be loud, but it never speaks with greater authority than the One who says, “Be still.”</p><div class="entry-meta"><span>Devotional</span><span>Prayer</span></div><footer><time>July 17, 2026</time><button>Open entry →</button></footer></div></article>
+      </div>
+    </section>
+
+    <section class="view" data-panel="prayers"><div class="simple-heading"><h2>Approved prayers</h2><p>Every prayer remains connected to its original devotional and video.</p></div><div class="prayer-list"><article><small>FROM “FINDING PEACE IN THE WAITING”</small><h3>A Prayer for the Waiting</h3><p>Father, meet me in the space between my prayer and your answer. Quiet the fear that tells me I have been forgotten...</p><button>Read full prayer →</button></article><article><small>FROM “STRENGTH IN OUR WEAKNESS”</small><h3>A Prayer for Grace</h3><p>Lord, release me from the burden of appearing strong. Let your grace become visible in every place where I feel insufficient...</p><button>Read full prayer →</button></article></div></section>
+
+    <section class="view" data-panel="scriptures"><div class="simple-heading"><h2>Scripture index</h2><p>References gathered from approved devotionals.</p></div><div class="scripture-grid"><article><strong>Isaiah 40:31</strong><span>Used in 3 devotionals</span></article><article><strong>Psalm 27:14</strong><span>Used in 2 devotionals</span></article><article><strong>Lamentations 3:25</strong><span>Used in 2 devotionals</span></article><article><strong>2 Corinthians 12:9</strong><span>Used in 1 devotional</span></article><article><strong>Mark 4:39</strong><span>Used in 1 devotional</span></article><article><strong>Philippians 4:7</strong><span>Used in 2 devotionals</span></article></div></section>
+
+    <section class="view" data-panel="books" id="books"><div class="book-builder"><div class="book-cover"><img src="assets/rhm-logo.png" alt="RHM Publications"><small>30 DAYS OF</small><strong>Morning<br>Mercies</strong><i></i><span>RHM PUBLICATIONS</span></div><div><span class="gold-label">BOOK IN PROGRESS</span><h2>Morning Mercies</h2><p>Build the collection from approved library entries. Choosing chapters, ordering devotionals, cover art, notes, and final export all happen here—away from the video workspace.</p><div class="stats"><span><b>12</b> Entries</span><span><b>30</b> Goal</span><span><b>40%</b> Complete</span></div><div class="progress"><i></i></div><button class="primary">Open book builder →</button></div></div></section>
+  </main>
+  <script src="library.js"></script><script src="session.js"></script>
+</body></html>
