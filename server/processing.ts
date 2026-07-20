@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -68,6 +68,22 @@ async function uploadRenderedVideo(storagePath: string, filePath: string, onProg
   return file.size;
 }
 
+async function runFfmpegStage(args: string[], onTime?: (seconds: number) => void) {
+  const child = spawn((ffmpeg as { path: string }).path, ['-hide_banner', '-y', '-threads', '1', '-filter_threads', '1', '-filter_complex_threads', '1', ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let errorOutput = '';
+  child.stderr.on('data', chunk => {
+    const text = chunk.toString();
+    errorOutput = (errorOutput + text).slice(-8000);
+    const matches = [...text.matchAll(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/g)];
+    const match = matches[matches.length - 1];
+    if (match) onTime?.(Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]));
+  });
+  await new Promise<void>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code, signal) => code === 0 ? resolve() : reject(new Error(`FFmpeg exited with code ${String(code)}${signal ? ` after signal ${signal}` : ''}. ${errorOutput}`)));
+  });
+}
+
 async function processFullRenderJob(job: { id: string; devotional_id: string; owner_id: string }) {
   const { id: jobId, devotional_id: devotionalId, owner_id: ownerId } = job;
   const workDirectory = await mkdtemp(path.join(tmpdir(), 'rhm-full-render-'));
@@ -86,38 +102,32 @@ async function processFullRenderJob(job: { id: string; devotional_id: string; ow
     const logoPath = path.join(projectRoot, 'assets', 'rhm-logo.png');
     const outputPath = path.join(workDirectory, 'rhm-polished-master.mp4');
     const totalSeconds = Math.max(83, Number(project.duration_seconds || 0) + 83);
-    const filter = [
-      '[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p,setpts=PTS-STARTPTS[introv]',
-      '[0:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[introa]',
-      '[1:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p,setpts=PTS-STARTPTS[sourcebase]',
-      '[3:v]scale=96:-1,format=rgba,colorchannelmixer=aa=0.82[wm]',
-      '[sourcebase][wm]overlay=W-w-26:H-h-26[sourcev]',
-      '[1:a]highpass=f=80,lowpass=f=14500,afftdn=nf=-25,acompressor=threshold=-18dB:ratio=2.5:attack=20:release=250,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[sourcea]',
-      '[2:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p,setpts=PTS-STARTPTS[outrov]',
-      '[2:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[outroa]',
-      '[introv][introa][sourcev][sourcea][outrov][outroa]concat=n=3:v=1:a=1[v][a]'
-    ].join(';');
-    const child = spawn((ffmpeg as { path: string }).path, [
-      '-hide_banner', '-y', '-i', introPath, '-i', signed.signedUrl, '-i', outroPath, '-loop', '1', '-i', logoPath,
-      '-filter_complex', filter, '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-      '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest', outputPath
-    ], { stdio: ['ignore', 'ignore', 'pipe'] });
-    let errorOutput = '';
-    let lastProgress = 3;
-    child.stderr.on('data', chunk => {
-      const text = chunk.toString();
-      errorOutput = (errorOutput + text).slice(-7000);
-      const matches = [...text.matchAll(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/g)];
-      const match = matches[matches.length - 1];
-      if (!match) return;
-      const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
-      const progress = Math.min(88, 5 + Math.floor((seconds / totalSeconds) * 83));
+    const introOutput = path.join(workDirectory, '01-intro.mp4');
+    const sourceOutput = path.join(workDirectory, '02-source.mp4');
+    const outroOutput = path.join(workDirectory, '03-outro.mp4');
+    const videoFilter = 'scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p';
+    const commonOutput = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-profile:v', 'main', '-level', '3.1', '-g', '60', '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart'];
+
+    await runFfmpegStage(['-i', introPath, '-vf', videoFilter, '-af', 'aformat=sample_rates=48000:channel_layouts=stereo', ...commonOutput, introOutput]);
+    await updateJob(jobId, { progress: 9 });
+
+    let lastProgress = 9;
+    const sourceFilter = `[0:v]${videoFilter}[base];[1:v]scale=72:-1,format=rgba,colorchannelmixer=aa=0.82[wm];[base][wm]overlay=W-w-18:H-h-18[v]`;
+    await runFfmpegStage([
+      '-i', signed.signedUrl, '-loop', '1', '-i', logoPath, '-filter_complex', sourceFilter, '-map', '[v]', '-map', '0:a:0',
+      '-af', 'highpass=f=80,lowpass=f=14500,afftdn=nf=-25,acompressor=threshold=-18dB:ratio=2.5:attack=20:release=250,aformat=sample_rates=48000:channel_layouts=stereo',
+      ...commonOutput, '-shortest', sourceOutput
+    ], seconds => {
+      const progress = Math.min(82, 10 + Math.floor((seconds / Math.max(1, Number(project.duration_seconds || 1))) * 72));
       if (progress >= lastProgress + 2) { lastProgress = progress; void updateJob(jobId, { progress }); }
     });
-    await new Promise<void>((resolve, reject) => {
-      child.once('error', reject);
-      child.once('close', code => code === 0 ? resolve() : reject(new Error(`The master-video render stopped. ${errorOutput}`)));
-    });
+    await updateJob(jobId, { progress: 84 });
+
+    await runFfmpegStage(['-i', outroPath, '-vf', videoFilter, '-af', 'aformat=sample_rates=48000:channel_layouts=stereo', ...commonOutput, outroOutput]);
+    await updateJob(jobId, { progress: 89 });
+    const concatList = path.join(workDirectory, 'concat.txt');
+    await writeFile(concatList, [introOutput, sourceOutput, outroOutput].map(file => `file '${file.replace(/'/g, "'\\''")}'`).join('\n'), 'utf8');
+    await runFfmpegStage(['-f', 'concat', '-safe', '0', '-i', concatList, '-c', 'copy', '-movflags', '+faststart', outputPath]);
 
     await updateJob(jobId, { progress: 92 });
     const storagePath = `${ownerId}/${devotionalId}/renders/rhm-polished-master.mp4`;
