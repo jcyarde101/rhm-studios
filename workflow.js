@@ -1,7 +1,7 @@
 const steps=[...document.querySelectorAll('.step')];
 const panels=[...document.querySelectorAll('.stage')];
 const approvals=new Set();
-function showStep(number){steps.forEach(s=>s.classList.toggle('active',s.dataset.step===String(number)));panels.forEach(p=>p.classList.toggle('active',p.dataset.panel===String(number)));window.scrollTo({top:0,behavior:'smooth'})}
+function showStep(number){steps.forEach(s=>s.classList.toggle('active',s.dataset.step===String(number)));panels.forEach(p=>p.classList.toggle('active',p.dataset.panel===String(number)));if(Number(number)===3)void ensureShortDescription();window.scrollTo({top:0,behavior:'smooth'})}
 steps.forEach(step=>step.addEventListener('click',()=>showStep(step.dataset.step)));
 document.querySelectorAll('.chip').forEach(chip=>chip.addEventListener('click',()=>{document.querySelectorAll('.chip').forEach(c=>c.classList.remove('selected'));chip.classList.add('selected')}));
 document.querySelectorAll('.style-options').forEach(group=>group.querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{group.querySelectorAll('button').forEach(b=>b.classList.remove('selected'));button.classList.add('selected')})));
@@ -13,10 +13,75 @@ function notify(title='Stage approved',message='Your choices are saved. Preparin
 document.querySelectorAll('[data-approve]').forEach(button=>button.addEventListener('click',()=>{const n=Number(button.dataset.approve);approvals.add(n);const step=steps.find(s=>Number(s.dataset.step)===n);step.classList.add('complete');step.querySelector('b').textContent='APPROVED';notify();showStep(Math.min(n+1,5))}));
 document.querySelectorAll('.approve-mini').forEach(button=>button.addEventListener('click',()=>{button.textContent=button.classList.toggle('chosen')?'✓ Approved':'✓';notify('Edit choice saved','This decision will be used in the full render.')}));
 document.querySelectorAll('.preview-button').forEach(button=>button.addEventListener('click',()=>notify('Preview prepared','This prototype will play the rendered segment when the processing backend is connected.')));
-const writingDrafts={description:'<h2>Finding Peace in the Waiting</h2><p>Waiting on God is not wasted time. In the quiet space between prayer and answer, faith takes root and trust grows stronger.</p><p>Today’s message is an invitation to release the pressure of having every answer and rest in the promise of Isaiah 40:31: those who hope in the Lord will renew their strength.</p>',devotional:'<h2>Finding Peace in the Waiting</h2><p>There are seasons when our prayers seem to hang in the air. We have asked, believed, and watched—yet the answer has not arrived.</p><p>Isaiah 40:31 reminds us that waiting is not passive. Hope anchors the heart while God renews the strength we cannot manufacture ourselves. The waiting room can become holy ground when we stop measuring God’s faithfulness by our preferred timeline.</p><p>Today, release the need to understand every delay. Trust that unseen work is still work, and that God has not forgotten your name.</p>',prayer:'<h2>A Prayer for the Waiting</h2><p>Father, meet me in the space between my prayer and your answer. Quiet the fear that tells me I have been forgotten. Teach me to wait with active faith, to notice your presence, and to trust your timing.</p><p>Renew my strength as I place my hope in you. Give me peace for today and courage for the next faithful step. Amen.</p>',scriptures:'<h2>Scriptures in This Message</h2><p><strong>Isaiah 40:31</strong> — Those who hope in the Lord will renew their strength.</p><p><strong>Psalm 27:14</strong> — Wait for the Lord; be strong and take heart.</p><p><strong>Lamentations 3:25</strong> — The Lord is good to those whose hope is in him.</p>'};
-const writingApproved=new Set();let currentWriting='description';
-document.querySelectorAll('[data-writing]').forEach(tab=>tab.addEventListener('click',()=>{document.querySelectorAll('[data-writing]').forEach(t=>t.classList.remove('active'));tab.classList.add('active');currentWriting=tab.dataset.writing;document.getElementById('writingContent').innerHTML=writingDrafts[currentWriting];const approved=writingApproved.has(currentWriting);document.querySelector('.writing-approval span').textContent=approved?'Approved':'Not yet approved';document.getElementById('approveWriting').textContent=approved?'✓ Approved':'✓ Approve this draft'}));
-document.getElementById('approveWriting')?.addEventListener('click',()=>{writingDrafts[currentWriting]=document.getElementById('writingContent').innerHTML;writingApproved.add(currentWriting);document.querySelector('.writing-approval span').textContent='Approved';document.getElementById('approveWriting').textContent='✓ Approved';document.getElementById('writingCount').textContent=`${writingApproved.size} of 4`;document.querySelector('[data-approve="3"]').disabled=writingApproved.size<4;notify('Writing approved',`${currentWriting[0].toUpperCase()+currentWriting.slice(1)} saved in your voice.`)});
+const writingDrafts={devotional:'<h2>Full devotional</h2><p>This transcript-based draft will be connected after the short video description is approved.</p>',prayer:'<h2>Prayer</h2><p>This transcript-based prayer draft will be connected in the next written-content step.</p>',scriptures:'<h2>Scriptures in This Message</h2><p>The detected Scripture list will appear here for your review.</p>'};
+const writingApproved=new Set();let currentWriting='description';let currentShortDescription=null;let shortDescriptionLoading=false;
+
+function setDescriptionLoading(message='Preparing the title, foundational Scripture, and short description.') {
+  document.getElementById('shortDescriptionView').hidden=false;
+  document.getElementById('descriptionLoading').hidden=false;
+  document.getElementById('descriptionLoading').querySelector('p').textContent=message;
+  document.getElementById('descriptionDraft').hidden=true;
+  document.getElementById('descriptionError').hidden=true;
+  document.getElementById('approveWriting').disabled=true;
+}
+
+function renderShortDescription(draft) {
+  if (!draft) return;
+  currentShortDescription=draft;
+  document.getElementById('descriptionLoading').hidden=true;
+  document.getElementById('descriptionError').hidden=true;
+  document.getElementById('descriptionDraft').hidden=false;
+  document.getElementById('descriptionTitle').textContent=draft.title||'';
+  document.getElementById('descriptionScripture').textContent=draft.foundationalScripture||'';
+  const paragraphs=document.getElementById('descriptionParagraphs');paragraphs.innerHTML='';
+  (draft.paragraphs||[]).slice(0,2).forEach(copy=>{const paragraph=document.createElement('p');paragraph.textContent=copy;paragraphs.append(paragraph)});
+  const approved=Boolean(draft.approved);
+  if(approved)writingApproved.add('description');else writingApproved.delete('description');
+  document.getElementById('writingApprovalStatus').textContent=approved?'Approved and saved':'Not yet approved';
+  document.getElementById('approveWriting').textContent=approved?'✓ Description approved':'✓ Approve description';
+  document.getElementById('approveWriting').disabled=approved;
+  document.getElementById('writingCount').textContent=`${approved?1:0} of 1`;
+  document.querySelector('[data-approve="3"]').disabled=!approved;
+  document.getElementById('writingDraftBadge').textContent=approved?'DESCRIPTION APPROVED':'READY FOR REVIEW';
+}
+
+function showDescriptionError(message) {
+  document.getElementById('descriptionLoading').hidden=true;
+  document.getElementById('descriptionDraft').hidden=true;
+  document.getElementById('descriptionError').hidden=false;
+  document.getElementById('descriptionErrorCopy').textContent=message;
+  document.getElementById('approveWriting').disabled=true;
+}
+
+async function ensureShortDescription(guidance='') {
+  if(currentWriting!=='description'||shortDescriptionLoading||!workspaceProjectId)return false;
+  if(currentShortDescription&&!guidance){renderShortDescription(currentShortDescription);return true}
+  shortDescriptionLoading=true;setDescriptionLoading(guidance?'Rewriting the description from your transcript and guidance.':undefined);
+  try{
+    const result=await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/writing/short-description`,{method:'POST',body:JSON.stringify({guidance})});
+    renderShortDescription(result.draft);return true;
+  }catch(error){showDescriptionError(error.message);return false}finally{shortDescriptionLoading=false}
+}
+
+function switchWritingTab(kind) {
+  currentWriting=kind;
+  document.querySelectorAll('[data-writing]').forEach(tab=>tab.classList.toggle('active',tab.dataset.writing===kind));
+  const descriptionMode=kind==='description';
+  document.getElementById('shortDescriptionView').hidden=!descriptionMode;
+  document.getElementById('legacyWritingView').hidden=descriptionMode;
+  document.getElementById('requestWritingChanges').hidden=!descriptionMode;
+  document.getElementById('writingChangePanel').hidden=true;
+  document.querySelector('.writing-approval').hidden=!descriptionMode;
+  if(descriptionMode){document.getElementById('writingNotesTitle').textContent='Built from your transcript';void ensureShortDescription();return}
+  document.getElementById('writingContent').innerHTML=writingDrafts[kind]||'';
+  document.getElementById('writingNotesTitle').textContent='Coming after the short description';
+}
+
+document.querySelectorAll('[data-writing]').forEach(tab=>tab.addEventListener('click',()=>switchWritingTab(tab.dataset.writing)));
+document.getElementById('requestWritingChanges')?.addEventListener('click',()=>{const panel=document.getElementById('writingChangePanel');panel.hidden=!panel.hidden;if(!panel.hidden)document.getElementById('writingGuidance').focus()});
+document.getElementById('regenerateDescription')?.addEventListener('click',async event=>{const guidance=document.getElementById('writingGuidance').value.trim();if(!guidance)return notify('Tell AI what to change','Speak or type the correction before regenerating.');event.currentTarget.disabled=true;const succeeded=await ensureShortDescription(guidance);event.currentTarget.disabled=false;if(succeeded)document.getElementById('writingChangePanel').hidden=true});
+document.getElementById('retryDescription')?.addEventListener('click',()=>ensureShortDescription());
+document.getElementById('approveWriting')?.addEventListener('click',async event=>{if(currentWriting!=='description'||!currentShortDescription)return;const button=event.currentTarget;button.disabled=true;button.textContent='Saving approval...';try{const result=await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/writing/short-description/approve`,{method:'POST'});renderShortDescription(result.draft);notify('Description approved','Your transcript-based video description is saved and ready to use.')}catch(error){button.disabled=false;button.textContent='✓ Approve description';notify('Approval needs attention',error.message)}});
 const clips=[['Waiting is not wasted time','03:10–03:42','Strong hook · 32 sec'],['Hope renews your strength','08:38–09:16','Scripture · 38 sec'],['God has not forgotten you','14:02–14:35','Encouragement · 33 sec'],['Trust without every answer','10:20–10:48','Teaching · 28 sec'],['A prayer for the waiting','20:31–21:14','Prayer · 43 sec'],['The next faithful step','18:05–18:31','Practical · 26 sec']];
 const clipList=document.getElementById('clipList');
 clips.forEach((clip,i)=>{const item=document.createElement('label');item.className='clip-item'+(i===0?' active':'');item.innerHTML=`<input type="checkbox" ${i<3?'checked':''}><img src="assets/morning-devotional.png" alt=""><div><strong>${clip[0]}</strong><small>${clip[1]}</small><b>${clip[2]}</b></div>`;item.addEventListener('click',()=>{document.querySelectorAll('.clip-item').forEach(x=>x.classList.remove('active'));item.classList.add('active')});item.querySelector('input').addEventListener('change',()=>document.getElementById('selectedClips').textContent=document.querySelectorAll('.clip-item input:checked').length);clipList?.appendChild(item)});
@@ -383,6 +448,7 @@ function renderWorkspace(data) {
   renderPrimaryScripture(data.project.primary_scripture);
   const visualJob = (data.jobs || []).find(item => item.job_type === 'visual_analysis');
   renderVisualAnalysis(data.visualAnalysis, visualJob);
+  if (data.shortDescription) renderShortDescription(data.shortDescription);
   renderRunwayDirectionPlan(data.videoDirection);
   if (!data.videoDirection) renderRunwayDirectionSynopsis(data.videoDirectionSynopsis);
   const job = (data.jobs || []).find(item => item.job_type === 'transcription');

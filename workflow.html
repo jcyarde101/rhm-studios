@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="voice-input.css?v=20260720">
   <link rel="stylesheet" href="workflow-accessibility.css?v=20260720">
   <link rel="stylesheet" href="planning-workspace.css?v=20260720">
+  <link rel="stylesheet" href="written-description.css?v=20260720">
 </head>
 <body>
   <header class="topbar"><a href="index.html" class="back">← <img src="assets/rhm-logo.png" alt="RHM"><span>RHM Studios</span></a><div class="project-name"><strong>Finding Peace in the Waiting</strong><small>Draft saved just now</small></div><div class="header-actions"><button class="quiet" data-signout>Sign out</button><button class="quiet" id="previewAll">Preview full edit</button><button class="gold-button" id="finalizeButton">Review final package →</button></div></header>
@@ -107,10 +108,20 @@
       </section>
 
       <section class="stage" data-panel="3">
-        <div class="stage-heading"><div><span class="kicker">STEP 3 OF 5</span><h1>Shape the written message</h1><p>Edit each piece in your own voice. Approval is separate for every deliverable.</p></div><span class="ready-badge">4 DRAFTS READY</span></div>
+        <div class="stage-heading"><div><span class="kicker">STEP 3 OF 5</span><h1>Review the written message</h1><p>RHM Studios turns the transcript into your ready-to-post description. You review and approve it.</p></div><span class="ready-badge" id="writingDraftBadge">AI DRAFT</span></div>
         <div class="writing-tabs"><button class="active" data-writing="description">Short description <b>REVIEW</b></button><button data-writing="devotional">Full devotional <b>REVIEW</b></button><button data-writing="prayer">Prayer <b>REVIEW</b></button><button data-writing="scriptures">Scriptures <b>3 FOUND</b></button></div>
-        <div class="writing-editor"><div class="editor-main"><div class="editor-toolbar"><button>↶</button><button>↷</button><i></i><button><b>B</b></button><button><em>I</em></button><button>☷</button><span>58 words</span></div><div class="editable" id="writingContent" contenteditable="true"><h2>Finding Peace in the Waiting</h2><p>Waiting on God is not wasted time. In the quiet space between prayer and answer, faith takes root and trust grows stronger.</p><p>Today’s message is an invitation to release the pressure of having every answer and rest in the promise of Isaiah 40:31: those who hope in the Lord will renew their strength.</p></div></div><aside><span>AI DRAFT NOTES</span><h3>Built from your message</h3><ul><li>Central idea: waiting as active trust</li><li>Tone: hopeful and reassuring</li><li>Primary scripture: Isaiah 40:31</li></ul><button class="outline-button full">Regenerate with guidance</button><div class="writing-approval"><span>Not yet approved</span><button id="approveWriting">✓ Approve this draft</button></div></aside></div>
-        <div class="approval-bar"><div><span>STAGE APPROVAL</span><p><strong>Approve all four written deliverables when each feels like you.</strong><small><b id="writingCount">0 of 4</b> pieces approved.</small></p></div><button class="approve-button" data-approve="3" disabled>Continue to clips →</button></div>
+        <div class="writing-editor">
+          <div class="editor-main">
+            <div class="short-description-view" id="shortDescriptionView">
+              <div class="description-loading" id="descriptionLoading"><span></span><div><strong>Writing from your transcript</strong><p>Preparing the title, foundational Scripture, and short description.</p></div></div>
+              <article class="description-draft" id="descriptionDraft" hidden><span>VIDEO DESCRIPTION</span><h2 id="descriptionTitle"></h2><div class="description-scripture"><small>FOUNDATIONAL SCRIPTURE</small><strong id="descriptionScripture"></strong></div><div id="descriptionParagraphs"></div><small id="descriptionSourceNote">Created from this video's transcript.</small></article>
+              <div class="description-error" id="descriptionError" hidden><strong>The description needs attention</strong><p id="descriptionErrorCopy"></p><button class="outline-button" id="retryDescription" type="button">Try again</button></div>
+            </div>
+            <div id="legacyWritingView" hidden><div class="editor-toolbar"><button>↶</button><button>↷</button><i></i><button><b>B</b></button><button><em>I</em></button><button>☷</button><span>Draft</span></div><div class="editable" id="writingContent" contenteditable="true"></div></div>
+          </div>
+          <aside><span>AI DRAFT NOTES</span><h3 id="writingNotesTitle">Built from your transcript</h3><ul id="writingDraftNotes"><li>Faithful to the message you actually recorded</li><li>One or two short, polished paragraphs</li><li>Ready for StreamYard, YouTube, or Facebook</li></ul><button class="outline-button full" id="requestWritingChanges" type="button">Request changes</button><div class="writing-change-panel" id="writingChangePanel" hidden><label for="writingGuidance">Tell AI what to change</label><textarea id="writingGuidance" rows="4" placeholder="For example: Make it warmer, shorten the second paragraph, or emphasize the main point more clearly."></textarea><button id="regenerateDescription" type="button">Regenerate from transcript</button></div><div class="writing-approval"><span id="writingApprovalStatus">Not yet approved</span><button id="approveWriting">✓ Approve description</button></div></aside>
+        </div>
+        <div class="approval-bar"><div><span>DESCRIPTION APPROVAL</span><p><strong>Approve once the description accurately reflects your recorded message.</strong><small><b id="writingCount">0 of 1</b> description approved.</small></p></div><button class="approve-button" data-approve="3" disabled>Continue to clips →</button></div>
       </section>
 
       <section class="stage" data-panel="4">
@@ -143,5 +154,5 @@
     <audio id="deeAudio" hidden></audio>
   </aside>
   <div class="reading-modal" id="transcriptModal" hidden><button class="reading-modal-backdrop" type="button" aria-label="Close transcript"></button><section role="dialog" aria-modal="true" aria-labelledby="transcriptModalTitle"><header><div><span>FULL TRANSCRIPT</span><h2 id="transcriptModalTitle">Devotional transcript</h2></div><button id="closeTranscriptModal" type="button" aria-label="Close transcript">×</button></header><div class="reading-modal-body" id="transcriptModalBody"></div></section></div>
-  <script src="vendor/tus.min.js"></script><script src="workflow.js?v=20260720-visual-analysis"></script><script src="voice-input.js?v=20260720-planning"></script><script src="dee-agent.js?v=20260720-visual-analysis"></script><script src="session.js?v=20260720-planning"></script>
+  <script src="vendor/tus.min.js"></script><script src="workflow.js?v=20260720-written-description"></script><script src="voice-input.js?v=20260720-written-description"></script><script src="dee-agent.js?v=20260720-visual-analysis"></script><script src="session.js?v=20260720-planning"></script>
 </body></html>

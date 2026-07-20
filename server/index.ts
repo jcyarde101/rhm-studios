@@ -6,6 +6,7 @@ import { config } from './config.js';
 import { adminClient, createRequestClient } from './supabase.js';
 import { recoverInterruptedProcessingJobs, regenerateMessageReview, runQueuedProcessingJobs } from './processing.js';
 import { approveDeeNote, approveDeeVideoDirection, askDee, deleteDeeNote, draftDeeVideoDirection, getDeeMemory, listDeeVoices, synthesizeDeeSpeech, transcribeDeeAudio } from './dee.js';
+import { generateShortDescription, type ShortDescriptionDraft } from './writing.js';
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -17,7 +18,7 @@ app.use(express.json({ limit: '1mb' }));
 const publicFiles = [
   'styles.css', 'app.js', 'workflow.css', 'workflow-image.css', 'workflow-message-review.css', 'dee-agent.css', 'workflow.js', 'dee-agent.js',
   'library.css', 'library.js', 'rhm-brand.css', 'brand-media.css', 'session.js', 'voice-input.css', 'voice-input.js', 'workflow-accessibility.css', 'planning-workspace.css',
-  'auth.css', 'auth.js'
+  'auth.css', 'auth.js', 'written-description.css'
 ];
 for (const file of publicFiles) app.get(`/${file}`, (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
@@ -311,6 +312,17 @@ function cleanText(value: unknown, maxLength: number) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 }
 
+function parseShortDescription(content: string | null | undefined): ShortDescriptionDraft | null {
+  if (!content) return null;
+  try {
+    const draft = JSON.parse(content);
+    if (!draft?.title || !draft?.foundationalScripture || !Array.isArray(draft?.paragraphs)) return null;
+    return { title: String(draft.title), foundationalScripture: String(draft.foundationalScripture), paragraphs: draft.paragraphs.map(String).slice(0, 2) };
+  } catch {
+    return null;
+  }
+}
+
 function videoExtension(fileName: string, mimeType: string) {
   const extension = fileName.toLowerCase().match(/\.([a-z0-9]{2,5})$/)?.[1];
   if (extension && ['mp4', 'mov', 'webm', 'm4v'].includes(extension)) return extension;
@@ -343,7 +355,7 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const ownerId = res.locals.user.id;
   const projectId = String(req.params.projectId);
-  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }, { data: plan }, { data: videoDirectionStage }, { data: visualAnalysis }] = await Promise.all([
+  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }, { data: plan }, { data: videoDirectionStage }, { data: visualAnalysis }, { data: shortDescriptionOutput }] = await Promise.all([
     adminClient
       .from('devotionals')
       .select('id,title,primary_scripture,recording_date,duration_seconds,status,created_at,media_assets(id,kind,storage_path,size_bytes,mime_type,metadata)')
@@ -390,6 +402,15 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
       .select('status,sampled_frame_count,sampling_interval_seconds,analysis,updated_at')
       .eq('devotional_id', projectId)
       .eq('owner_id', ownerId)
+      .maybeSingle(),
+    adminClient
+      .from('written_outputs')
+      .select('content,approved,updated_at')
+      .eq('devotional_id', projectId)
+      .eq('owner_id', ownerId)
+      .eq('kind', 'short_description')
+      .order('version', { ascending: false })
+      .limit(1)
       .maybeSingle()
   ]);
   if (projectError || !project) return res.status(404).json({ error: 'This video project could not be found.' });
@@ -418,7 +439,51 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
       else if (savedDirection?.approvalSynopsis) videoDirectionSynopsis = { title: savedDirection.title, synopsis: savedDirection.approvalSynopsis };
     } catch {}
   }
-  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionSynopsis, videoDirectionStage, visualAnalysis });
+  const parsedShortDescription = parseShortDescription(shortDescriptionOutput?.content);
+  const shortDescription = parsedShortDescription ? { ...parsedShortDescription, approved: Boolean(shortDescriptionOutput?.approved), updatedAt: shortDescriptionOutput?.updated_at } : null;
+  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionSynopsis, videoDirectionStage, visualAnalysis, shortDescription });
+});
+
+app.post('/api/projects/:projectId/writing/short-description', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const guidance = cleanText(req.body?.guidance, 4000);
+  const [{ data: project }, { data: transcript }, { data: existing }] = await Promise.all([
+    adminClient.from('devotionals').select('id,title,primary_scripture').eq('id', projectId).eq('owner_id', ownerId).maybeSingle(),
+    adminClient.from('written_outputs').select('content').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('kind', 'transcript').order('version', { ascending: false }).limit(1).maybeSingle(),
+    adminClient.from('written_outputs').select('content,approved,updated_at').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('kind', 'short_description').eq('version', 1).maybeSingle()
+  ]);
+  if (!project) return res.status(404).json({ error: 'This video project could not be found.' });
+  if (!transcript?.content) return res.status(409).json({ error: 'The transcript must be ready before the short description can be written.' });
+  const savedDraft = parseShortDescription(existing?.content);
+  if (savedDraft && !guidance) return res.json({ draft: { ...savedDraft, approved: Boolean(existing?.approved), updatedAt: existing?.updated_at } });
+  try {
+    const draft = await generateShortDescription(transcript.content, project.title, project.primary_scripture || '', guidance);
+    const { data, error } = await adminClient.from('written_outputs').upsert({
+      devotional_id: projectId,
+      owner_id: ownerId,
+      kind: 'short_description',
+      content: JSON.stringify(draft),
+      model_provider: 'openai:gpt-4o-mini',
+      approved: false,
+      version: 1
+    }, { onConflict: 'devotional_id,kind,version' }).select('approved,updated_at').single();
+    if (error || !data) throw error || new Error('The generated description could not be saved.');
+    res.json({ draft: { ...draft, approved: false, updatedAt: data.updated_at } });
+  } catch (error: any) {
+    console.error('Short description generation failed', { projectId, message: error?.message });
+    res.status(502).json({ error: String(error?.message || 'The description could not be generated.') });
+  }
+});
+
+app.post('/api/projects/:projectId/writing/short-description/approve', requireUser, async (req, res) => {
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const { data, error } = await adminClient.from('written_outputs').update({ approved: true }).eq('devotional_id', projectId).eq('owner_id', ownerId).eq('kind', 'short_description').eq('version', 1).select('content,approved,updated_at').maybeSingle();
+  const draft = parseShortDescription(data?.content);
+  if (error || !data || !draft) return res.status(409).json({ error: 'Generate the short description before approving it.' });
+  res.json({ draft: { ...draft, approved: true, updatedAt: data.updated_at } });
 });
 
 app.post('/api/projects/:projectId/message-review', requireUser, async (req, res) => {
