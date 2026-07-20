@@ -35,7 +35,8 @@
         <button class="icon-button" id="themeToggle" aria-label="Toggle dark mode"><span data-icon="moon"></span></button>
         <button class="icon-button notification" aria-label="Notifications"><span data-icon="bell"></span></button>
         <button class="icon-button" data-signout aria-label="Sign out" title="Sign out">↪</button>
-        <button class="primary-button" id="newUpload"><span>＋</span> New devotional</button>
+        <button class="secondary-button" id="newPlan"><span>✦</span> Plan before recording</button>
+        <button class="primary-button" id="newUpload"><span>＋</span> Upload recording</button>
       </header>
 
       <section class="content">
@@ -86,10 +87,11 @@
   </div>
 
   <div class="modal" id="uploadModal" aria-hidden="true"><div class="modal-backdrop"></div><div class="modal-card"><button class="modal-close" aria-label="Close">×</button><span class="modal-icon" data-icon="upload"></span><h2>Upload a devotional</h2><p>Drop your StreamYard recording here and we’ll prepare the creative brief before any processing begins.</p><label class="dropzone"><input type="file" id="fileInput" accept="video/*"><strong>Drag & drop your video</strong><span>or click to browse</span><small>MP4, MOV, WebM · up to 4 GB</small></label><div class="modal-fields"><label>Working title<input value="Untitled morning devotional"></label><label>Primary scripture<input placeholder="e.g. Psalm 46:10"></label></div><button class="primary-button full" id="startProject">Create project</button><p class="human-note">Nothing publishes automatically. You’ll approve every output.</p></div></div>
+  <div class="modal" id="planModal" aria-hidden="true"><div class="modal-backdrop"></div><div class="modal-card planning-modal-card"><button class="modal-close" aria-label="Close">×</button><span class="modal-icon" data-icon="writing"></span><h2>Plan before you record</h2><p>Start with the message while it is still taking shape. Research with Dee, keep your notes, and attach the StreamYard recording later.</p><div class="planning-start-fields"><label>Working title<input id="planTitle" maxlength="200" placeholder="What are you calling this message?"></label><label>Primary scripture<input id="planScripture" maxlength="200" placeholder="e.g. Psalm 46:10 NLT"></label><label class="full-field">Big idea or starting thought<textarea id="planBigIdea" rows="4" maxlength="4000" placeholder="What is on your heart? This can be rough—Dee will help you explore it."></textarea></label></div><div class="form-error" id="planFormError" role="alert"></div><button class="primary-button full" id="createPlan">Create planning workspace</button><p class="human-note">Your notes stay connected when you attach the recording.</p></div></div>
   <div class="toast" id="toast"><span>✓</span><p><strong>Project ready</strong><small>Your devotional has been added to the review queue.</small></p></div>
   <script src="vendor/tus.min.js"></script>
-  <script src="app.js"></script>
-  <script src="voice-input.js?v=20260720"></script>
+  <script src="app.js?v=20260720-planning"></script>
+  <script src="voice-input.js?v=20260720-planning"></script>
   <script src="session.js"></script>
 </body>
 </html>

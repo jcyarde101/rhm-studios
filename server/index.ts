@@ -16,7 +16,7 @@ app.use(express.json({ limit: '1mb' }));
 
 const publicFiles = [
   'styles.css', 'app.js', 'workflow.css', 'workflow-image.css', 'workflow-message-review.css', 'dee-agent.css', 'workflow.js', 'dee-agent.js',
-  'library.css', 'library.js', 'rhm-brand.css', 'brand-media.css', 'session.js', 'voice-input.css', 'voice-input.js', 'workflow-accessibility.css',
+  'library.css', 'library.js', 'rhm-brand.css', 'brand-media.css', 'session.js', 'voice-input.css', 'voice-input.js', 'workflow-accessibility.css', 'planning-workspace.css',
   'auth.css', 'auth.js'
 ];
 for (const file of publicFiles) app.get(`/${file}`, (_req, res) => {
@@ -294,10 +294,10 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const ownerId = res.locals.user.id;
   const projectId = String(req.params.projectId);
-  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }] = await Promise.all([
+  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }, { data: plan }] = await Promise.all([
     adminClient
       .from('devotionals')
-      .select('id,title,primary_scripture,recording_date,duration_seconds,status,created_at,media_assets(id,kind,storage_path,size_bytes,mime_type)')
+      .select('id,title,primary_scripture,recording_date,duration_seconds,status,created_at,media_assets(id,kind,storage_path,size_bytes,mime_type,metadata)')
       .eq('id', projectId)
       .eq('owner_id', ownerId)
       .single(),
@@ -322,11 +322,17 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
       .select('id,job_type,status,progress,error_message,created_at,started_at,completed_at')
       .eq('devotional_id', projectId)
       .eq('owner_id', ownerId)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }),
+    adminClient
+      .from('devotional_plans')
+      .select('big_idea,intended_audience,desired_outcome,research_notes,questions_to_explore,updated_at')
+      .eq('devotional_id', projectId)
+      .eq('owner_id', ownerId)
+      .maybeSingle()
   ]);
   if (projectError || !project) return res.status(404).json({ error: 'This video project could not be found.' });
 
-  const source = (project.media_assets || []).find((asset: any) => asset.kind === 'source_video');
+  const source = (project.media_assets || []).find((asset: any) => asset.kind === 'source_video' && asset.metadata?.upload_state === 'complete');
   let videoUrl: string | null = null;
   if (source?.storage_path) {
     const { data: signed } = await adminClient.storage.from(videoBucket).createSignedUrl(source.storage_path, 60 * 60);
@@ -341,7 +347,7 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
       userDirection = typeof notes.userDirection === 'string' ? notes.userDirection : '';
     } catch {}
   }
-  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [] });
+  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source });
 });
 
 app.post('/api/projects/:projectId/message-review', requireUser, async (req, res) => {
@@ -400,6 +406,100 @@ app.post('/api/projects/:projectId/retry-processing', requireUser, async (req, r
   }).eq('id', job.id).eq('owner_id', ownerId);
   if (config.processingWorkerEnabled) void runQueuedProcessingJobs();
   res.json({ message: 'Transcription has been queued again.' });
+});
+
+app.post('/api/projects/planning', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ownerId = res.locals.user.id;
+  const title = cleanText(req.body?.title, 200);
+  const scripture = cleanText(req.body?.scripture, 200) || null;
+  const bigIdea = cleanText(req.body?.bigIdea, 4000);
+  if (!title) return res.status(400).json({ error: 'Enter a working title for the planning workspace.' });
+  const { data: project, error: projectError } = await adminClient
+    .from('devotionals')
+    .insert({ owner_id: ownerId, title, primary_scripture: scripture, status: 'draft' })
+    .select('id,title,primary_scripture,status,created_at')
+    .single();
+  if (projectError || !project) return res.status(500).json({ error: 'The planning workspace could not be created.' });
+  const { error: planError } = await adminClient.from('devotional_plans').insert({ devotional_id: project.id, owner_id: ownerId, big_idea: bigIdea });
+  if (planError) {
+    await adminClient.from('devotionals').delete().eq('id', project.id).eq('owner_id', ownerId);
+    return res.status(500).json({ error: 'The research notebook could not be created.' });
+  }
+  res.status(201).json({ project, message: 'Your pre-recording workspace is ready.' });
+});
+
+app.put('/api/projects/:projectId/plan', requireUser, async (req, res) => {
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const { data: project } = await adminClient.from('devotionals').select('id').eq('id', projectId).eq('owner_id', ownerId).maybeSingle();
+  if (!project) return res.status(404).json({ error: 'This planning workspace could not be found.' });
+  const plan = {
+    devotional_id: projectId,
+    owner_id: ownerId,
+    big_idea: cleanText(req.body?.bigIdea, 12000),
+    intended_audience: cleanText(req.body?.intendedAudience, 6000),
+    desired_outcome: cleanText(req.body?.desiredOutcome, 12000),
+    research_notes: cleanText(req.body?.researchNotes, 30000),
+    questions_to_explore: cleanText(req.body?.questionsToExplore, 12000)
+  };
+  const { data, error } = await adminClient.from('devotional_plans').upsert(plan, { onConflict: 'devotional_id' }).select('big_idea,intended_audience,desired_outcome,research_notes,questions_to_explore,updated_at').single();
+  if (error || !data) return res.status(500).json({ error: 'Your planning notes could not be saved.' });
+  res.json({ plan: data, message: 'Planning notes saved.' });
+});
+
+app.post('/api/projects/:projectId/prepare-upload', requireUser, async (req, res) => {
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const fileName = cleanText(req.body?.file?.name, 255);
+  const mimeType = cleanText(req.body?.file?.type, 100) || 'application/octet-stream';
+  const sizeBytes = Number(req.body?.file?.size);
+  if (!fileName || !Number.isFinite(sizeBytes) || sizeBytes <= 0) return res.status(400).json({ error: 'Choose a valid video file.' });
+  if (!allowedVideoTypes.has(mimeType)) return res.status(415).json({ error: 'Use an MP4, MOV, M4V, or WebM video.' });
+  if (sizeBytes > config.maxUploadBytes) return res.status(413).json({ error: 'This video exceeds the current 50 GB upload limit.' });
+  const [{ data: project }, { data: existingSources }] = await Promise.all([
+    adminClient.from('devotionals').select('id,title,status').eq('id', projectId).eq('owner_id', ownerId).maybeSingle(),
+    adminClient.from('media_assets').select('id,storage_path,metadata').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('kind', 'source_video')
+  ]);
+  if (!project) return res.status(404).json({ error: 'This planning workspace could not be found.' });
+  const completedSource = (existingSources || []).find((asset: any) => asset.metadata?.upload_state === 'complete');
+  if (completedSource) return res.status(409).json({ error: 'A source video is already attached to this project.' });
+  const pendingSources = existingSources || [];
+  if (pendingSources.length) {
+    await adminClient.storage.from(videoBucket).remove(pendingSources.map((asset: any) => asset.storage_path));
+    await adminClient.from('media_assets').delete().in('id', pendingSources.map((asset: any) => asset.id)).eq('owner_id', ownerId);
+  }
+  const extension = videoExtension(fileName, mimeType);
+  const storagePath = `${ownerId}/${projectId}/source-${Date.now()}.${extension}`;
+  const { data: asset, error } = await adminClient.from('media_assets').insert({
+    devotional_id: projectId,
+    owner_id: ownerId,
+    kind: 'source_video',
+    storage_path: storagePath,
+    mime_type: mimeType,
+    size_bytes: sizeBytes,
+    metadata: { original_name: fileName, upload_state: 'pending', attached_after_planning: true }
+  }).select('id').single();
+  if (error || !asset) return res.status(500).json({ error: 'The secure media record could not be created.' });
+  res.status(201).json({
+    project,
+    upload: { assetId: asset.id, bucket: videoBucket, path: storagePath, endpoint: resumableUploadEndpoint, accessToken: res.locals.accessToken, chunkSize: 6 * 1024 * 1024 }
+  });
+});
+
+app.delete('/api/projects/:projectId/pending-upload/:assetId', requireUser, async (req, res) => {
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const assetId = String(req.params.assetId);
+  const { data: asset } = await adminClient.from('media_assets')
+    .select('id,storage_path,metadata')
+    .eq('id', assetId).eq('devotional_id', projectId).eq('owner_id', ownerId).maybeSingle();
+  if (!asset) return res.status(204).end();
+  const metadata = (asset.metadata && typeof asset.metadata === 'object' ? asset.metadata : {}) as Record<string, unknown>;
+  if (metadata.upload_state === 'complete') return res.status(409).json({ error: 'A completed source video cannot be removed here.' });
+  await adminClient.storage.from(videoBucket).remove([asset.storage_path]);
+  await adminClient.from('media_assets').delete().eq('id', asset.id).eq('owner_id', ownerId);
+  res.status(204).end();
 });
 
 app.post('/api/projects', requireUser, async (req, res) => {

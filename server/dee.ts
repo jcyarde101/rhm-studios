@@ -61,14 +61,15 @@ async function loadDeeContext(ownerId: string, projectId?: string) {
     .eq('owner_id', ownerId);
   projectQuery = projectId ? projectQuery.eq('id', projectId) : projectQuery.order('created_at', { ascending: false }).limit(1);
   const { data: project } = await projectQuery.maybeSingle();
-  if (!project) return { project: null, transcript: '', review: null, userDirection: '', jobs: [], notes: [], recentMemory: [] };
+  if (!project) return { project: null, transcript: '', review: null, userDirection: '', jobs: [], notes: [], recentMemory: [], plan: null };
   const memoryCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [{ data: transcript }, { data: stage }, { data: jobs }, { data: notes }, { data: recentMemory }] = await Promise.all([
+  const [{ data: transcript }, { data: stage }, { data: jobs }, { data: notes }, { data: recentMemory }, { data: plan }] = await Promise.all([
     adminClient.from('written_outputs').select('content').eq('devotional_id', project.id).eq('kind', 'transcript').order('version', { ascending: false }).limit(1).maybeSingle(),
     adminClient.from('workflow_stages').select('status,notes').eq('devotional_id', project.id).eq('stage', 'message').maybeSingle(),
     adminClient.from('processing_jobs').select('job_type,status,progress,error_message').eq('devotional_id', project.id).order('created_at', { ascending: false }),
     adminClient.from('dee_notes').select('id,title,content,category,scriptures,approved,source,created_at').eq('owner_id', ownerId).eq('devotional_id', project.id).order('created_at', { ascending: false }).limit(20),
-    adminClient.from('dee_messages').select('devotional_id,role,content,created_at').eq('owner_id', ownerId).gte('created_at', memoryCutoff).order('created_at', { ascending: false }).limit(30)
+    adminClient.from('dee_messages').select('devotional_id,role,content,created_at').eq('owner_id', ownerId).gte('created_at', memoryCutoff).order('created_at', { ascending: false }).limit(30),
+    adminClient.from('devotional_plans').select('big_idea,intended_audience,desired_outcome,research_notes,questions_to_explore,updated_at').eq('owner_id', ownerId).eq('devotional_id', project.id).maybeSingle()
   ]);
   let review = null;
   let userDirection = '';
@@ -79,7 +80,7 @@ async function loadDeeContext(ownerId: string, projectId?: string) {
       userDirection = typeof notes.userDirection === 'string' ? notes.userDirection : '';
     } catch {}
   }
-  return { project, transcript: transcript?.content ?? '', review, userDirection, jobs: jobs ?? [], notes: notes ?? [], recentMemory: (recentMemory ?? []).reverse() };
+  return { project, transcript: transcript?.content ?? '', review, userDirection, jobs: jobs ?? [], notes: notes ?? [], recentMemory: (recentMemory ?? []).reverse(), plan };
 }
 
 function responseText(body: any) {
@@ -158,6 +159,7 @@ export async function askDee(ownerId: string, message: string, projectId?: strin
     processingJobs: context.jobs,
     aiMessageReview: context.review,
     creatorDirection: context.userDirection,
+    preRecordingPlan: context.plan,
     transcript: context.transcript.slice(0, 60000),
     durableMinistryNotes: context.notes
   });
@@ -173,6 +175,8 @@ export async function askDee(ownerId: string, message: string, projectId?: strin
       instructions: `You are Dee (D-E-E), the creator's warm, discerning associate-minister-style sounding board and ministry life coach inside RHM Studios.
 
 Your purpose is to help the creator hear what the devotional actually communicates, deepen the biblical and pastoral possibilities, uncover missed points, and ask fruitful questions that draw out the creator's own message. Work through an associate minister's lens: attentive to Scripture, audience, pastoral care, theological coherence, practical application, and responsible communication.
+
+When there is no transcript yet, the creator is in a pre-recording workspace. Use the preRecordingPlan as the primary source, help with responsible research and message development, and never imply that you watched or heard a video. Ask questions that prepare the creator to record. Once a transcript exists, compare it with the original plan and help identify whether the recorded message met those stated goals.
 
 For substantive questions, consider: (1) the big idea actually supported by the transcript, (2) what was said clearly, (3) overlooked or underdeveloped openings, (4) related Scripture connections and why they are relevant, (5) alternative directions without derailing the central message, (6) what listeners may need emotionally or practically, and (7) one or two coaching questions that help the creator choose. Do not force every category into every answer.
 

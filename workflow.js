@@ -33,6 +33,8 @@ let workspacePoll = null;
 let directionInitialized = false;
 let loadedScriptureKey = '';
 let currentPrimaryScripture = '';
+let planningInitialized = false;
+let planningUpload = null;
 
 async function workspaceRequest(url, options = {}) {
   const response = await fetch(url, {
@@ -54,6 +56,65 @@ function formatWorkspaceTime(totalSeconds) {
   const minutes = Math.floor((seconds % 3600) / 60);
   const remainder = Math.floor(seconds % 60);
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}` : `${minutes}:${String(remainder).padStart(2, '0')}`;
+}
+
+function formatPlanningBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`;
+  return `${(value / 1024 ** 2).toFixed(1)} MB`;
+}
+
+function readPlanningVideoDuration(file) {
+  return new Promise(resolve => {
+    const video = document.createElement('video');
+    const url = URL.createObjectURL(file);
+    let done = false;
+    const finish = value => {
+      if (done) return;
+      done = true;
+      URL.revokeObjectURL(url);
+      video.remove();
+      resolve(Number.isFinite(value) ? Math.round(value) : null);
+    };
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => finish(video.duration);
+    video.onerror = () => finish(null);
+    video.src = url;
+    window.setTimeout(() => finish(null), 5000);
+  });
+}
+
+function setPlanningUploadProgress(percent, label, message) {
+  document.getElementById('planningUploadProgress').hidden = false;
+  document.getElementById('planningUploadPercent').textContent = `${Math.round(percent)}%`;
+  document.getElementById('planningUploadBar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  document.getElementById('planningUploadLabel').textContent = label;
+  document.getElementById('planningUploadMessage').textContent = message;
+}
+
+function renderPlanningWorkspace(data) {
+  document.body.classList.add('planning-mode');
+  document.getElementById('planningWorkspace').hidden = false;
+  const headerStatus = document.querySelector('.project-name small');
+  if (headerStatus) headerStatus.textContent = 'Pre-recording research workspace';
+  if (!planningInitialized) {
+    const plan = data.plan || {};
+    document.getElementById('planBigIdeaWorkspace').value = plan.big_idea || '';
+    document.getElementById('planAudience').value = plan.intended_audience || '';
+    document.getElementById('planOutcome').value = plan.desired_outcome || '';
+    document.getElementById('planResearch').value = plan.research_notes || '';
+    document.getElementById('planQuestions').value = plan.questions_to_explore || '';
+    planningInitialized = true;
+  }
+  if (workspacePoll) {
+    window.clearInterval(workspacePoll);
+    workspacePoll = null;
+  }
+}
+
+function leavePlanningMode() {
+  document.body.classList.remove('planning-mode');
+  document.getElementById('planningWorkspace').hidden = true;
 }
 
 function transcriptParagraphs(transcript) {
@@ -203,6 +264,11 @@ function renderWorkspace(data) {
   document.title = `${data.project.title} · RHM Studios`;
   const headerTitle = document.querySelector('.project-name strong');
   if (headerTitle) headerTitle.textContent = data.project.title;
+  if (data.planningMode) {
+    renderPlanningWorkspace(data);
+    return;
+  }
+  leavePlanningMode();
   const headerStatus = document.querySelector('.project-name small');
   if (headerStatus) headerStatus.textContent = data.project.status === 'review' ? 'AI message review ready' : 'Processing your private upload';
   attachRealVideo(data.videoUrl);
@@ -326,6 +392,119 @@ document.getElementById('retryMessageProcessing')?.addEventListener('click', asy
   } finally {
     button.disabled = false;
   }
+});
+
+document.getElementById('savePlan')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const status = document.getElementById('planSaveStatus');
+  button.disabled = true;
+  status.textContent = 'Saving your research and message map...';
+  try {
+    const result = await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/plan`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        bigIdea: document.getElementById('planBigIdeaWorkspace').value.trim(),
+        intendedAudience: document.getElementById('planAudience').value.trim(),
+        desiredOutcome: document.getElementById('planOutcome').value.trim(),
+        researchNotes: document.getElementById('planResearch').value.trim(),
+        questionsToExplore: document.getElementById('planQuestions').value.trim()
+      })
+    });
+    status.textContent = `Saved ${new Date(result.plan.updated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Dee can use these notes now.`;
+    notify('Planning notes saved', 'Your message map and research remain attached to this project.');
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById('planningVideoFile')?.addEventListener('change', event => {
+  const file = event.target.files?.[0];
+  const dropzone = event.target.closest('.planning-dropzone');
+  const error = document.getElementById('planningUploadError');
+  error.textContent = '';
+  if (!file) return;
+  dropzone.classList.add('has-file');
+  dropzone.querySelector('strong').textContent = file.name;
+  dropzone.querySelector('small').textContent = `${formatPlanningBytes(file.size)} selected`;
+});
+
+document.getElementById('attachPlanningVideo')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const file = document.getElementById('planningVideoFile').files?.[0];
+  const error = document.getElementById('planningUploadError');
+  error.textContent = '';
+  if (!file) return void (error.textContent = 'Choose the StreamYard recording first.');
+  if (file.size > 50 * 1024 ** 3) return void (error.textContent = 'This recording is larger than the current 50 GB limit.');
+  if (typeof tus === 'undefined') return void (error.textContent = 'The secure uploader did not load. Refresh the page and try again.');
+  button.disabled = true;
+  button.textContent = 'Preparing secure upload...';
+  let assetId = null;
+  try {
+    const durationPromise = readPlanningVideoDuration(file);
+    const prepared = await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/prepare-upload`, {
+      method: 'POST',
+      body: JSON.stringify({ file: { name: file.name, type: file.type || 'application/octet-stream', size: file.size } })
+    });
+    assetId = prepared.upload.assetId;
+    setPlanningUploadProgress(1, 'Uploading to private storage', `${formatPlanningBytes(file.size)} selected. Interrupted transfers retry automatically.`);
+    await new Promise((resolve, reject) => {
+      planningUpload = new tus.Upload(file, {
+        endpoint: prepared.upload.endpoint,
+        retryDelays: [0, 3000, 5000, 10000, 20000],
+        headers: { authorization: `Bearer ${prepared.upload.accessToken}` },
+        uploadDataDuringCreation: true,
+        removeFingerprintOnSuccess: true,
+        chunkSize: prepared.upload.chunkSize,
+        fingerprint(selectedFile) {
+          return Promise.resolve(`rhm-plan-${prepared.upload.path}-${selectedFile.name}-${selectedFile.size}-${selectedFile.lastModified}`);
+        },
+        metadata: {
+          bucketName: prepared.upload.bucket,
+          objectName: prepared.upload.path,
+          contentType: file.type || 'application/octet-stream',
+          cacheControl: '3600'
+        },
+        onProgress(uploaded, total) {
+          const percent = total ? uploaded / total * 100 : 0;
+          setPlanningUploadProgress(percent, 'Uploading to private storage', `${formatPlanningBytes(uploaded)} of ${formatPlanningBytes(total)} uploaded.`);
+        },
+        onSuccess: resolve,
+        onError(uploadError) {
+          reject(new Error(uploadError?.originalResponse?.getBody?.() || uploadError?.message || 'The resumable upload failed.'));
+        }
+      });
+      planningUpload.findPreviousUploads().then(previous => {
+        if (previous.length) planningUpload.resumeFromPreviousUpload(previous[0]);
+        planningUpload.start();
+      }).catch(reject);
+    });
+    setPlanningUploadProgress(100, 'Finalizing your project', 'The video arrived. Starting transcription and message review.');
+    const durationSeconds = await durationPromise;
+    await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/complete-upload`, {
+      method: 'POST',
+      body: JSON.stringify({ assetId, durationSeconds })
+    });
+    planningUpload = null;
+    notify('Recording attached', 'Your research is safe. Transcription and message review are beginning.');
+    window.setTimeout(() => window.location.reload(), 700);
+  } catch (uploadError) {
+    planningUpload = null;
+    if (assetId) await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/pending-upload/${encodeURIComponent(assetId)}`, { method: 'DELETE' }).catch(() => {});
+    setPlanningUploadProgress(0, 'Upload needs attention', uploadError.message);
+    error.textContent = uploadError.message;
+    button.disabled = false;
+    button.textContent = 'Attach video and begin processing';
+  }
+});
+
+document.getElementById('openDeeFromPlan')?.addEventListener('click', () => document.getElementById('deeLauncher')?.click());
+
+window.addEventListener('beforeunload', event => {
+  if (!planningUpload) return;
+  event.preventDefault();
+  event.returnValue = '';
 });
 
 loadRealWorkspace();

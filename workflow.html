@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="brand-media.css">
   <link rel="stylesheet" href="voice-input.css?v=20260720">
   <link rel="stylesheet" href="workflow-accessibility.css?v=20260720">
+  <link rel="stylesheet" href="planning-workspace.css?v=20260720">
 </head>
 <body>
   <header class="topbar"><a href="index.html" class="back">← <img src="assets/rhm-logo.png" alt="RHM"><span>RHM Studios</span></a><div class="project-name"><strong>Finding Peace in the Waiting</strong><small>Draft saved just now</small></div><div class="header-actions"><button class="quiet" data-signout>Sign out</button><button class="quiet" id="previewAll">Preview full edit</button><button class="gold-button" id="finalizeButton">Review final package →</button></div></header>
@@ -31,6 +32,29 @@
 
     <main>
       <section class="stage active" data-panel="1">
+        <section class="planning-workspace" id="planningWorkspace" hidden>
+          <header class="planning-hero"><div><span>PRE-RECORDING WORKSPACE</span><h1>Build the message before the camera turns on</h1><p>Research, think out loud with Dee, and keep the heart of your message in one place. When the StreamYard recording is ready, attach it here and continue in this same project.</p></div><b>NO VIDEO NEEDED YET</b></header>
+          <div class="planning-grid">
+            <section class="planning-notebook">
+              <div class="planning-section-head"><div><span>MESSAGE MAP</span><h2>What are you preparing?</h2></div><small>Every field saves to this project and becomes context for Dee.</small></div>
+              <div class="planning-fields">
+                <label>Big idea or burden on your heart<textarea id="planBigIdeaWorkspace" rows="5" placeholder="What do you believe this message needs to say?"></textarea></label>
+                <label>Who is this for?<textarea id="planAudience" rows="3" placeholder="Describe the people, season, or need you have in mind."></textarea></label>
+                <label>What should listeners understand or do?<textarea id="planOutcome" rows="4" placeholder="What change, encouragement, reflection, or action are you praying for?"></textarea></label>
+                <label>Research and sermon notes<textarea id="planResearch" rows="9" placeholder="Add observations, background, illustrations, word studies, links, quotations, or rough notes."></textarea></label>
+                <label>Questions to explore with Dee<textarea id="planQuestions" rows="5" placeholder="What still needs prayer, research, clarity, or another perspective?"></textarea></label>
+              </div>
+              <footer><p id="planSaveStatus" role="status">Your planning notes are private.</p><button class="gold-button" id="savePlan" type="button">Save planning notes</button></footer>
+            </section>
+            <aside class="planning-next">
+              <span>WHEN YOU ARE READY</span><h2>Attach the StreamYard recording</h2><p>This will not erase your research or Dee’s notes. It moves this same project into transcription and message review.</p>
+              <label class="planning-dropzone"><input id="planningVideoFile" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-m4v"><strong>Choose your recording</strong><small>MP4, MOV, M4V, or WebM · up to 50 GB</small></label>
+              <div class="planning-upload-progress" id="planningUploadProgress" hidden><div><strong id="planningUploadLabel">Preparing secure upload</strong><b id="planningUploadPercent">0%</b></div><i><span id="planningUploadBar"></span></i><p id="planningUploadMessage"></p></div>
+              <button class="gold-button full" id="attachPlanningVideo" type="button">Attach video and begin processing</button><p class="planning-upload-error" id="planningUploadError" role="alert"></p>
+              <div class="planning-dee-tip"><span>D</span><p><strong>Dee is already available</strong><small>Ask her to find related Scriptures, challenge an assumption, explore another direction, or turn your thoughts into research questions.</small></p><button type="button" id="openDeeFromPlan">Talk with Dee</button></div>
+            </aside>
+          </div>
+        </section>
         <div class="stage-heading"><div><span class="kicker">STEP 1 OF 5</span><h1>Confirm the heart of the message</h1><p>Review the transcript and guide what the creative work should emphasize.</p></div><span class="ready-badge">PROXY READY IN 1:42</span></div>
         <div class="review-layout">
           <div class="player-card"><div class="video"><img src="assets/morning-devotional.png" alt="Video preview"><img class="rhm-watermark" src="assets/rhm-logo.png" alt="RHM Studios watermark"><button class="play">▶</button><span class="quality">PREVIEW · 540P</span><div class="scripture-preview"><small>ISAIAH 40:31</small><strong>“Those who hope in the Lord<br>will renew their strength.”</strong></div></div><div class="timeline"><span>08:42</span><div><i></i><b style="left:36%"></b><b style="left:63%"></b><b style="left:81%"></b></div><span>24:18</span></div><div class="player-note"><span>✦</span><p><strong>Fast-start preview</strong><small>Audio cleanup and transcript are ready. Color, B-roll, and full-resolution rendering happen after your direction.</small></p></div></div>
@@ -109,5 +133,5 @@
     <audio id="deeAudio" hidden></audio>
   </aside>
   <div class="reading-modal" id="transcriptModal" hidden><button class="reading-modal-backdrop" type="button" aria-label="Close transcript"></button><section role="dialog" aria-modal="true" aria-labelledby="transcriptModalTitle"><header><div><span>FULL TRANSCRIPT</span><h2 id="transcriptModalTitle">Devotional transcript</h2></div><button id="closeTranscriptModal" type="button" aria-label="Close transcript">×</button></header><div class="reading-modal-body" id="transcriptModalBody"></div></section></div>
-  <script src="workflow.js?v=20260720-ministry"></script><script src="voice-input.js?v=20260720-ministry"></script><script src="dee-agent.js?v=20260720-ministry"></script><script src="session.js?v=20260720-ministry"></script>
+  <script src="vendor/tus.min.js"></script><script src="workflow.js?v=20260720-planning"></script><script src="voice-input.js?v=20260720-planning"></script><script src="dee-agent.js?v=20260720-planning"></script><script src="session.js?v=20260720-planning"></script>
 </body></html>

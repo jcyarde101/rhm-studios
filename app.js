@@ -22,6 +22,12 @@ const modal = document.getElementById('uploadModal');
 const fileInput = document.getElementById('fileInput');
 const startProjectButton = document.getElementById('startProject');
 const projectList = document.getElementById('library');
+const planModal = document.getElementById('planModal');
+const planTitleInput = document.getElementById('planTitle');
+const planScriptureInput = document.getElementById('planScripture');
+const planBigIdeaInput = document.getElementById('planBigIdea');
+const planFormError = document.getElementById('planFormError');
+const createPlanButton = document.getElementById('createPlan');
 const titleInput = modal.querySelector('.modal-fields label:nth-child(1) input');
 const scriptureInput = modal.querySelector('.modal-fields label:nth-child(2) input');
 const modalFields = modal.querySelector('.modal-fields');
@@ -81,6 +87,18 @@ function openModal() {
 function closeModal() {
   modal.classList.remove('open');
   modal.setAttribute('aria-hidden', 'true');
+}
+
+function openPlanModal() {
+  planFormError.textContent = '';
+  planModal.classList.add('open');
+  planModal.setAttribute('aria-hidden', 'false');
+  window.setTimeout(() => planTitleInput.focus(), 50);
+}
+
+function closePlanModal() {
+  planModal.classList.remove('open');
+  planModal.setAttribute('aria-hidden', 'true');
 }
 
 function escapeHtml(value) {
@@ -153,17 +171,20 @@ function renderProjects(payload) {
   document.getElementById('projectCount').textContent = payload.counts?.projects ?? projects.length;
   document.getElementById('clipCount').textContent = payload.counts?.clips ?? 0;
   const summary = document.getElementById('projectSummary') || document.querySelector('.section-heading p');
-  if (summary) summary.textContent = projects.length ? `${projects.length} project${projects.length === 1 ? '' : 's'} in your private studio.` : 'No uploads yet. Your first project will appear here.';
+  if (summary) summary.textContent = projects.length ? `${projects.length} project${projects.length === 1 ? '' : 's'} in your private studio.` : 'No projects yet. Begin with an idea or upload a recording.';
 
   if (!projects.length) {
-    projectList.innerHTML = `<article class="empty-projects"><img src="assets/rhm-logo.png" alt=""><div><h3>No video projects yet</h3><p>Choose a video up to ${formatBytes(maxUploadBytes)}. You will see live progress and a clear confirmation.</p></div><button class="primary-button" type="button" data-upload-first>Upload first video</button></article>`;
+    projectList.innerHTML = `<article class="empty-projects"><img src="assets/rhm-logo.png" alt=""><div><h3>Start your first devotional</h3><p>Open a planning workspace now, or upload a finished StreamYard recording up to ${formatBytes(maxUploadBytes)}.</p></div><div class="empty-project-actions"><button class="secondary-button" type="button" data-plan-first>Plan before recording</button><button class="primary-button" type="button" data-upload-first>Upload recording</button></div></article>`;
     return;
   }
 
   projectList.innerHTML = projects.map(project => {
-    const [label, description] = statusDetails(project.status);
     const source = (project.media_assets || []).find(asset => asset.kind === 'source_video');
-    const size = source?.size_bytes ? formatBytes(source.size_bytes) : 'Upload pending';
+    const planning = !source && project.status === 'draft';
+    const [defaultLabel, defaultDescription] = statusDetails(project.status);
+    const label = planning ? 'PLANNING' : defaultLabel;
+    const description = planning ? 'Research and shape the message with Dee, then attach your recording here.' : defaultDescription;
+    const size = source?.size_bytes ? formatBytes(source.size_bytes) : 'No video yet';
     const videoDone = ['uploaded', 'processing', 'review', 'approved', 'published'].includes(project.status);
     return `<article class="project-card">
       <div class="video-thumb"><img src="assets/morning-devotional.png" alt="Video project"><img class="media-watermark" src="assets/rhm-logo.png" alt="RHM Studios watermark"><span>${escapeHtml(size)}</span></div>
@@ -171,11 +192,11 @@ function renderProjects(payload) {
         <div class="project-top"><div><span class="review-pill status-${escapeHtml(project.status)}">${escapeHtml(label)}</span><h3>${escapeHtml(project.title)}</h3><p>${escapeHtml(project.primary_scripture || 'Scripture not added')} &middot; ${escapeHtml(formatDate(project.created_at))}</p></div></div>
         <div class="project-state-copy">${escapeHtml(description)}</div>
         <div class="pipeline">
-          <div class="pipeline-step ${videoDone ? 'done' : ''}"><span>${videoDone ? '&check;' : '1'}</span><p><strong>Video</strong><small>${videoDone ? 'Secured' : 'Uploading'}</small></p></div>
-          <i></i><div class="pipeline-step"><span>2</span><p><strong>Transcript</strong><small>${videoDone ? 'Queued' : 'Waiting'}</small></p></div>
-          <i></i><div class="pipeline-step"><span>3</span><p><strong>Review</strong><small>Waiting</small></p></div>
+          <div class="pipeline-step ${planning || videoDone ? 'done' : ''}"><span>${planning || videoDone ? '&check;' : '1'}</span><p><strong>${planning ? 'Plan' : 'Video'}</strong><small>${planning ? 'Started' : (videoDone ? 'Secured' : 'Uploading')}</small></p></div>
+          <i></i><div class="pipeline-step ${videoDone ? 'done' : ''}"><span>${videoDone ? '&check;' : '2'}</span><p><strong>Video</strong><small>${videoDone ? 'Attached' : 'Attach later'}</small></p></div>
+          <i></i><div class="pipeline-step"><span>3</span><p><strong>Transcript</strong><small>${videoDone ? 'Queued' : 'Waiting'}</small></p></div>
         </div>
-        <div class="project-actions"><button class="primary-button" type="button" data-review-project="${escapeHtml(project.id)}" ${videoDone ? '' : 'disabled'}>Open workspace</button></div>
+        <div class="project-actions"><button class="primary-button" type="button" data-review-project="${escapeHtml(project.id)}">${planning ? 'Open planning workspace' : 'Open workspace'}</button></div>
       </div>
     </article>`;
   }).join('');
@@ -318,9 +339,37 @@ async function startUpload() {
   }
 }
 
+async function createPlanningWorkspace() {
+  const title = planTitleInput.value.trim();
+  planFormError.textContent = '';
+  if (!title) return void (planFormError.textContent = 'Enter a working title for this message.');
+  createPlanButton.disabled = true;
+  createPlanButton.textContent = 'Creating your workspace...';
+  try {
+    const result = await apiRequest('/api/projects/planning', {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        scripture: planScriptureInput.value.trim(),
+        bigIdea: planBigIdeaInput.value.trim()
+      })
+    });
+    window.location.href = `workflow.html?project=${encodeURIComponent(result.project.id)}`;
+  } catch (error) {
+    planFormError.textContent = error.message;
+  } finally {
+    createPlanButton.disabled = false;
+    createPlanButton.textContent = 'Create planning workspace';
+  }
+}
+
 ['newUpload', 'chooseVideo'].forEach(id => document.getElementById(id)?.addEventListener('click', openModal));
+document.getElementById('newPlan')?.addEventListener('click', openPlanModal);
 modal.querySelector('.modal-close').addEventListener('click', closeModal);
 modal.querySelector('.modal-backdrop').addEventListener('click', closeModal);
+planModal.querySelector('.modal-close').addEventListener('click', closePlanModal);
+planModal.querySelector('.modal-backdrop').addEventListener('click', closePlanModal);
+createPlanButton.addEventListener('click', createPlanningWorkspace);
 fileInput.addEventListener('change', event => {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -348,6 +397,7 @@ cancelUploadButton.addEventListener('click', async () => {
 
 projectList.addEventListener('click', event => {
   if (event.target.closest('[data-upload-first]')) openModal();
+  if (event.target.closest('[data-plan-first]')) openPlanModal();
   if (event.target.closest('[data-retry-projects]')) loadProjects();
   const reviewButton = event.target.closest('[data-review-project]');
   if (reviewButton) window.location.href = `workflow.html?project=${encodeURIComponent(reviewButton.dataset.reviewProject)}`;
