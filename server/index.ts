@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { adminClient, createRequestClient } from './supabase.js';
 import { recoverInterruptedProcessingJobs, regenerateMessageReview, runQueuedProcessingJobs } from './processing.js';
-import { askDee, listDeeVoices, synthesizeDeeSpeech, transcribeDeeAudio } from './dee.js';
+import { approveDeeNote, askDee, deleteDeeNote, getDeeMemory, listDeeVoices, synthesizeDeeSpeech, transcribeDeeAudio } from './dee.js';
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -104,6 +104,8 @@ app.get('/api/dee/status', requireUser, (_req, res) => {
   res.json({
     name: 'Dee',
     mode: 'read_only',
+    role: 'ministry_sounding_board',
+    memoryWindowDays: 7,
     textReady: Boolean(config.openaiApiKey),
     voiceReady: Boolean(config.elevenLabsApiKey),
     defaultVoiceConfigured: Boolean(config.elevenLabsVoiceId)
@@ -138,11 +140,39 @@ app.post('/api/dee/chat', requireUser, async (req, res) => {
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
   if (!message) return res.status(400).json({ error: 'Ask Dee a question first.' });
   try {
-    const reply = await askDee(res.locals.user.id, message, projectId, history);
-    res.json({ reply, mode: 'read_only' });
+    const result = await askDee(res.locals.user.id, message, projectId, history);
+    res.json({ ...result, mode: 'read_only', memoryWindowDays: 7 });
   } catch (error: any) {
     console.error('Dee response failed', { message: error?.message });
     res.status(502).json({ error: error?.message || 'Dee could not respond.' });
+  }
+});
+
+app.get('/api/dee/memory', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const projectId = cleanText(req.query.projectId, 100);
+  if (!projectId) return res.status(400).json({ error: 'Open a project to view Dee\'s memory.' });
+  try {
+    res.json(await getDeeMemory(res.locals.user.id, projectId));
+  } catch (error: any) {
+    res.status(404).json({ error: error?.message || 'Dee\'s memory could not be loaded.' });
+  }
+});
+
+app.patch('/api/dee/notes/:noteId/approve', requireUser, async (req, res) => {
+  try {
+    res.json({ note: await approveDeeNote(res.locals.user.id, String(req.params.noteId)) });
+  } catch (error: any) {
+    res.status(404).json({ error: error?.message || 'The note could not be approved.' });
+  }
+});
+
+app.delete('/api/dee/notes/:noteId', requireUser, async (req, res) => {
+  try {
+    await deleteDeeNote(res.locals.user.id, String(req.params.noteId));
+    res.status(204).end();
+  } catch (error: any) {
+    res.status(404).json({ error: error?.message || 'The note could not be removed.' });
   }
 });
 

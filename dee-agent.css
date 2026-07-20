@@ -2,7 +2,7 @@
 .dee-launcher > span, .dee-avatar > span { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 50%; background: linear-gradient(145deg,#d5aa3c,#ffe09a); color: #081d40; font: 700 18px "Newsreader"; }
 .dee-launcher b { font-size: 10px; }
 .dee-launcher i, .dee-avatar i { width: 8px; height: 8px; border-radius: 50%; background: #70d594; box-shadow: 0 0 0 3px rgba(112,213,148,.14); }
-.dee-panel { position: fixed; right: 20px; top: 82px; bottom: 20px; z-index: 40; width: min(430px, calc(100vw - 30px)); display: flex; flex-direction: column; border: 1px solid #294c7d; border-radius: 16px; background: #f9fafc; box-shadow: 0 25px 70px rgba(4,19,44,.35); overflow: hidden; transform: translateX(calc(100% + 40px)); opacity: 0; pointer-events: none; transition: .25s ease; }
+.dee-panel { position: fixed; right: 20px; top: 82px; bottom: 20px; z-index: 40; width: min(540px, calc(100vw - 30px)); display: flex; flex-direction: column; border: 1px solid #294c7d; border-radius: 16px; background: #f9fafc; box-shadow: 0 25px 70px rgba(4,19,44,.35); overflow: hidden; transform: translateX(calc(100% + 40px)); opacity: 0; pointer-events: none; transition: .25s ease; }
 .dee-panel.open { transform: none; opacity: 1; pointer-events: auto; }
 .dee-panel > header { display: flex; align-items: center; gap: 11px; min-height: auto; padding: 15px 17px; background: linear-gradient(135deg,#071b3d,#12366f); color: #fff; }
 .dee-avatar { position: relative; }
@@ -20,13 +20,14 @@
 .dee-voice-row select { min-width: 0; border: 1px solid #ccd2dd; border-radius: 7px; background: #fff; padding: 7px 9px; color: #12203a; font-size: 9px; }
 .dee-voice-row button { border: 1px solid #ccd2dd; border-radius: 7px; background: #fff; color: #0b2856; padding: 7px 9px; font-size: 8px; }
 .dee-conversation { flex: 1; min-height: 160px; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-.dee-message { display: flex; align-items: flex-start; gap: 8px; max-width: 92%; }
+.dee-message { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; max-width: 92%; }
 .dee-message > span { flex: 0 0 auto; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: #d7b65c; color: #071b3d; font: 700 11px "Newsreader"; }
-.dee-message p { margin: 0; padding: 10px 12px; border-radius: 4px 12px 12px; background: #e9eef6; color: #24324a; font-size: 10px; line-height: 1.55; white-space: pre-wrap; }
+.dee-message p { margin: 0; padding: 11px 13px; border-radius: 4px 12px 12px; background: #e9eef6; color: #24324a; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .dee-message.user { align-self: flex-end; flex-direction: row-reverse; }
 .dee-message.user > span { background: #12366f; color: #fff; }
 .dee-message.user p { background: #12366f; color: #fff; border-radius: 12px 4px 12px 12px; }
 .dee-message.thinking p { color: #6b7890; }
+.dee-message-sources{display:flex;flex-direction:column;gap:4px;width:calc(100% - 33px);margin-left:33px;padding:8px 10px;border-left:2px solid #d0ad4e;background:#fff}.dee-message-sources strong{font-size:8px;letter-spacing:.08em;text-transform:uppercase;color:#80641e}.dee-message-sources a{font-size:10px;line-height:1.35;color:#174887;text-decoration:underline}.dee-message.user .dee-message-sources{display:none}
 .dee-quick-prompts { display: flex; gap: 5px; overflow-x: auto; padding: 8px 14px; border-top: 1px solid #e0e3e9; background: #fff; }
 .dee-quick-prompts button { white-space: nowrap; border: 1px solid #ccd4e0; border-radius: 18px; background: #f7f9fc; color: #15325f; padding: 6px 9px; font-size: 8px; }
 .dee-error { min-height: 0; padding: 0 15px; color: #a74332; font-size: 8px; background: #fff; }
@@ -40,4 +41,5 @@
 .dee-mic.recording { background: #ffe8e5; box-shadow: 0 0 0 3px rgba(195,75,67,.15); }
 .dee-send { padding: 0 12px; background: #d5af4c; color: #071b3d; }
 .dee-composer button:disabled, .dee-voice-row button:disabled { opacity: .45; cursor: wait; }
+.dee-tabs{display:flex;align-items:center;gap:5px;padding:8px 14px;background:#eef2f7;border-bottom:1px solid #dce1e9}.dee-tabs button{border:1px solid transparent;border-radius:18px;background:transparent;color:#58657a;padding:7px 10px;font-size:10px;font-weight:700}.dee-tabs button.active{background:#0d2d61;color:#fff;border-color:#0d2d61}.dee-tabs button b{display:inline-grid;place-items:center;min-width:17px;height:17px;margin-left:4px;border-radius:9px;background:#d8b75d;color:#071b3d;font-size:8px}.dee-tabs>span{margin-left:auto;color:#718097;font-size:8px}.dee-tab-panel[hidden]{display:none!important}.dee-notes{flex:1;overflow:auto;padding:14px;background:#f6f8fb}.dee-notes-intro{padding:3px 3px 12px}.dee-notes-intro strong{font:600 17px "Newsreader";color:#142746}.dee-notes-intro p,.dee-notes-empty p{font-size:11px;line-height:1.5;color:#6c788d;margin:4px 0}.dee-note{margin-bottom:9px;padding:13px;border:1px solid #d5dce7;border-left:3px solid #d0a943;border-radius:9px;background:#fff;box-shadow:0 5px 14px rgba(11,37,75,.06)}.dee-note.approved{border-left-color:#46845c}.dee-note>div:first-child{display:flex;flex-direction:column;gap:4px}.dee-note>div:first-child span{text-transform:uppercase;letter-spacing:.1em;color:#93721c;font-size:8px;font-weight:800}.dee-note.approved>div:first-child span{color:#3e754f}.dee-note strong{font:600 15px "Newsreader";color:#142746}.dee-note>p{font-size:11px;line-height:1.55;color:#4c5b71;margin:8px 0}.dee-note>small{display:block;color:#755f27;font-size:9px;margin:7px 0}.dee-note>div:last-child{display:flex;gap:6px;margin-top:9px}.dee-note button{border:1px solid #b9c4d3;border-radius:7px;background:#0d2d61;color:#fff;padding:6px 9px;font-size:9px}.dee-note button.remove{background:#fff;color:#8d3d37}.dee-notes-empty{padding:22px;border:1px dashed #c7d0dc;border-radius:10px;text-align:center;background:#fff}.dee-notes-empty strong{font:600 16px "Newsreader";color:#142746}
 @media(max-width:700px){.dee-launcher{right:14px;bottom:14px}.dee-panel{inset:10px;width:auto}.dee-scope{grid-template-columns:1fr}.dee-panel>header{padding-top:12px}.dee-conversation{min-height:220px}}

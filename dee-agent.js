@@ -7,6 +7,9 @@ const deeMic = document.getElementById('deeMic');
 const deeVoice = document.getElementById('deeVoice');
 const deeError = document.getElementById('deeError');
 const deeAudio = document.getElementById('deeAudio');
+const deeNotes = document.getElementById('deeNotes');
+const deeNotesList = document.getElementById('deeNotesList');
+const deeNoteCount = document.getElementById('deeNoteCount');
 const deeProjectId = new URLSearchParams(window.location.search).get('project');
 const deeHistory = [];
 let deeVoices = [];
@@ -35,7 +38,7 @@ function setDeeBusy(value) {
   deeMic.disabled = value && !deeRecorder;
 }
 
-function addDeeMessage(role, text, extraClass = '') {
+function addDeeMessage(role, text, extraClass = '', sources = []) {
   const message = document.createElement('div');
   message.className = `dee-message ${role} ${extraClass}`.trim();
   const avatar = document.createElement('span');
@@ -43,9 +46,103 @@ function addDeeMessage(role, text, extraClass = '') {
   const copy = document.createElement('p');
   copy.textContent = text;
   message.append(avatar, copy);
+  if (role === 'assistant' && Array.isArray(sources) && sources.length) {
+    const sourceList = document.createElement('div');
+    sourceList.className = 'dee-message-sources';
+    const label = document.createElement('strong');
+    label.textContent = 'Current-event sources';
+    sourceList.append(label);
+    sources.forEach(source => {
+      try {
+        const url = new URL(source.url);
+        if (!['http:', 'https:'].includes(url.protocol)) return;
+        const link = document.createElement('a');
+        link.href = url.href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = source.title || url.hostname;
+        sourceList.append(link);
+      } catch {}
+    });
+    if (sourceList.children.length > 1) message.append(sourceList);
+  }
   deeConversation.append(message);
   deeConversation.scrollTop = deeConversation.scrollHeight;
   return message;
+}
+
+function renderDeeNotes(notes = []) {
+  if (!deeNotesList) return;
+  deeNoteCount.textContent = String(notes.length);
+  deeNotesList.innerHTML = '';
+  if (!notes.length) {
+    deeNotesList.innerHTML = '<div class="dee-notes-empty"><strong>No notes yet</strong><p>Durable insights, Scripture connections, and coaching questions will appear here for your review.</p></div>';
+    return;
+  }
+  notes.forEach(note => {
+    const card = document.createElement('article');
+    card.className = `dee-note ${note.approved ? 'approved' : 'suggested'}`;
+    const heading = document.createElement('div');
+    const category = document.createElement('span');
+    category.textContent = `${note.category || 'insight'} · ${note.approved ? 'kept' : 'review'}`;
+    const title = document.createElement('strong');
+    title.textContent = note.title;
+    heading.append(category, title);
+    const content = document.createElement('p');
+    content.textContent = note.content;
+    const scriptures = document.createElement('small');
+    scriptures.textContent = note.scriptures?.length ? `Scriptures: ${note.scriptures.join(', ')}` : '';
+    const actions = document.createElement('div');
+    if (!note.approved) {
+      const keep = document.createElement('button');
+      keep.type = 'button';
+      keep.textContent = 'Keep note';
+      keep.addEventListener('click', async () => {
+        keep.disabled = true;
+        try {
+          await deeRequest(`/api/dee/notes/${encodeURIComponent(note.id)}/approve`, { method: 'PATCH' });
+          await loadDeeMemory(false);
+        } catch (error) { deeError.textContent = error.message; keep.disabled = false; }
+      });
+      actions.append(keep);
+    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'remove';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', async () => {
+      if (!window.confirm('Remove this Dee note? This cannot be undone.')) return;
+      remove.disabled = true;
+      try {
+        await deeRequest(`/api/dee/notes/${encodeURIComponent(note.id)}`, { method: 'DELETE' });
+        await loadDeeMemory(false);
+      } catch (error) { deeError.textContent = error.message; remove.disabled = false; }
+    });
+    actions.append(remove);
+    card.append(heading, content);
+    if (scriptures.textContent) card.append(scriptures);
+    card.append(actions);
+    deeNotesList.append(card);
+  });
+}
+
+async function loadDeeMemory(renderConversation = true) {
+  if (!deeProjectId) return;
+  try {
+    const response = await deeRequest(`/api/dee/memory?projectId=${encodeURIComponent(deeProjectId)}`);
+    const data = await response.json();
+    renderDeeNotes(data.notes || []);
+    if (renderConversation && data.messages?.length) {
+      deeConversation.innerHTML = '';
+      deeHistory.length = 0;
+      data.messages.forEach(turn => {
+        addDeeMessage(turn.role, turn.content, '', turn.metadata?.sources || []);
+        deeHistory.push({ role: turn.role, content: turn.content });
+      });
+    }
+  } catch (error) {
+    deeError.textContent = `Dee's memory could not load: ${error.message}`;
+  }
 }
 
 async function speakAsDee(text) {
@@ -81,7 +178,31 @@ async function askDee(message) {
     const data = await response.json();
     thinking.classList.remove('thinking');
     thinking.querySelector('p').textContent = data.reply;
+    if (data.sources?.length) {
+      data.sources.forEach(source => {
+        try {
+          const url = new URL(source.url);
+          if (!['http:', 'https:'].includes(url.protocol)) return;
+          let sourceList = thinking.querySelector('.dee-message-sources');
+          if (!sourceList) {
+            sourceList = document.createElement('div');
+            sourceList.className = 'dee-message-sources';
+            const label = document.createElement('strong');
+            label.textContent = 'Current-event sources';
+            sourceList.append(label);
+            thinking.append(sourceList);
+          }
+          const link = document.createElement('a');
+          link.href = url.href;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = source.title || url.hostname;
+          sourceList.append(link);
+        } catch {}
+      });
+    }
     deeHistory.push({ role: 'assistant', content: data.reply });
+    if (data.note) await loadDeeMemory(false);
     await speakAsDee(data.reply).catch(error => { deeError.textContent = `Dee answered in text, but her voice could not play: ${error.message}`; });
   } catch (error) {
     thinking.remove();
@@ -96,7 +217,7 @@ async function loadDee() {
     const statusResponse = await deeRequest('/api/dee/status');
     const status = await statusResponse.json();
     deeVoiceReady = status.voiceReady;
-    document.getElementById('deeStatus').textContent = status.voiceReady ? 'STUDIO ASSISTANT · VOICE READY · READ ONLY' : 'STUDIO ASSISTANT · TEXT READY · READ ONLY';
+    document.getElementById('deeStatus').textContent = status.voiceReady ? 'MINISTRY SOUNDING BOARD · VOICE READY' : 'MINISTRY SOUNDING BOARD · TEXT READY';
     if (!status.voiceReady) {
       deeVoice.innerHTML = '<option value="">Add ELEVENLABS_API_KEY in Render</option>';
       document.getElementById('previewDeeVoice').disabled = true;
@@ -194,6 +315,16 @@ document.getElementById('previewDeeVoice')?.addEventListener('click', async even
   event.currentTarget.disabled = false;
 });
 document.querySelectorAll('.dee-quick-prompts button').forEach(button => button.addEventListener('click', () => askDee(button.textContent)));
+document.querySelectorAll('[data-dee-tab]').forEach(button => button.addEventListener('click', () => {
+  const tabName = button.dataset.deeTab;
+  document.querySelectorAll('[data-dee-tab]').forEach(item => item.classList.toggle('active', item === button));
+  document.querySelectorAll('[data-dee-panel]').forEach(panel => {
+    const active = panel.dataset.deePanel === tabName;
+    panel.classList.toggle('active', active);
+    panel.hidden = !active;
+  });
+}));
 window.addEventListener('beforeunload', () => { if (deeAudioUrl) URL.revokeObjectURL(deeAudioUrl); });
 
 loadDee();
+loadDeeMemory();

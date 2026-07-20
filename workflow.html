@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="workflow.css">
   <link rel="stylesheet" href="workflow-image.css">
   <link rel="stylesheet" href="workflow-message-review.css?v=20260720-state-fix">
-  <link rel="stylesheet" href="dee-agent.css">
+  <link rel="stylesheet" href="dee-agent.css?v=20260720-ministry">
   <link rel="stylesheet" href="rhm-brand.css">
   <link rel="stylesheet" href="brand-media.css">
   <link rel="stylesheet" href="voice-input.css?v=20260720">
@@ -98,14 +98,16 @@
   <button class="dee-launcher" id="deeLauncher" type="button" aria-label="Talk with Dee"><span>D</span><i></i><b>Ask Dee</b></button>
   <aside class="dee-panel" id="deePanel" aria-hidden="true">
     <header><div class="dee-avatar"><span>D</span><i></i></div><div><strong>Dee</strong><small id="deeStatus">STUDIO ASSISTANT · READ ONLY</small></div><button id="deeClose" type="button" aria-label="Close Dee">×</button></header>
-    <div class="dee-scope"><span>SAFE START</span><p>Dee can explain, summarize, and recommend. She cannot approve, publish, delete, or spend without your permission.</p></div>
+    <div class="dee-scope"><span>MINISTRY SOUNDING BOARD</span><p>Dee explores the message, Scripture connections, missed possibilities, and coaching questions. Her suggestions remain yours to discern.</p></div>
+    <div class="dee-tabs"><button class="active" type="button" data-dee-tab="chat">Conversation</button><button type="button" data-dee-tab="notes">AI notes <b id="deeNoteCount">0</b></button><span>7-day conversation memory</span></div>
     <div class="dee-voice-row"><label for="deeVoice">ElevenLabs voice</label><select id="deeVoice"><option value="">Loading voices...</option></select><button id="previewDeeVoice" type="button">▶ Preview</button></div>
-    <div class="dee-conversation" id="deeConversation" aria-live="polite"><div class="dee-message assistant"><span>D</span><p>Hello, I’m Dee. Ask me what this devotional communicates, what needs clarity, or what I would address first.</p></div></div>
-    <div class="dee-quick-prompts"><button type="button">Give me the synopsis</button><button type="button">What needs clarity?</button><button type="button">What should I fix first?</button></div>
+    <div class="dee-conversation dee-tab-panel active" id="deeConversation" data-dee-panel="chat" aria-live="polite"><div class="dee-message assistant"><span>D</span><p>Hello, I’m Dee. Let’s listen closely to the message, explore Scripture connections, and uncover possibilities worth developing.</p></div></div>
+    <div class="dee-notes dee-tab-panel" id="deeNotes" data-dee-panel="notes" hidden><div class="dee-notes-intro"><strong>Notes from this devotional</strong><p>Dee records durable insights and questions. Suggested notes remain marked for review until you keep them.</p></div><div id="deeNotesList"></div></div>
+    <div class="dee-quick-prompts"><button type="button">What message do you actually hear?</button><button type="button">What points did I miss?</button><button type="button">Connect other scriptures</button><button type="button">Coach me with questions</button></div>
     <div class="dee-error" id="deeError" role="alert"></div>
     <div class="dee-composer"><textarea id="deeInput" rows="2" placeholder="Ask Dee about this devotional..."></textarea><button class="dee-mic" id="deeMic" type="button" aria-label="Speak to Dee"><span>●</span><small>Talk</small></button><button class="dee-send" id="deeSend" type="button">Send</button></div>
     <audio id="deeAudio" hidden></audio>
   </aside>
   <div class="reading-modal" id="transcriptModal" hidden><button class="reading-modal-backdrop" type="button" aria-label="Close transcript"></button><section role="dialog" aria-modal="true" aria-labelledby="transcriptModalTitle"><header><div><span>FULL TRANSCRIPT</span><h2 id="transcriptModalTitle">Devotional transcript</h2></div><button id="closeTranscriptModal" type="button" aria-label="Close transcript">×</button></header><div class="reading-modal-body" id="transcriptModalBody"></div></section></div>
-  <script src="workflow.js?v=20260720-reading"></script><script src="voice-input.js?v=20260720"></script><script src="dee-agent.js?v=20260720-reading"></script><script src="session.js?v=20260720-reading"></script>
+  <script src="workflow.js?v=20260720-ministry"></script><script src="voice-input.js?v=20260720-ministry"></script><script src="dee-agent.js?v=20260720-ministry"></script><script src="session.js?v=20260720-ministry"></script>
 </body></html>
