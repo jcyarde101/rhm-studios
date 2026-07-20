@@ -51,12 +51,10 @@ function addVideoDirectionAction(message, guidance) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'dee-video-direction-action';
-  button.textContent = 'Approve for video direction';
+  button.textContent = 'Prepare video direction synopsis';
   button.addEventListener('click', async () => {
-    const approved = window.confirm('Approve this guidance as the basis for the video edit? Dee will translate it into a Runway-aware brief. Nothing will render or publish yet.');
-    if (!approved) return;
     button.disabled = true;
-    button.textContent = 'Building Runway edit brief...';
+    button.textContent = 'Preparing direction synopsis...';
     deeError.textContent = '';
     try {
       const response = await deeRequest('/api/dee/video-direction', {
@@ -64,16 +62,60 @@ function addVideoDirectionAction(message, guidance) {
         body: JSON.stringify({ projectId: deeProjectId, approvedGuidance: guidance })
       });
       const data = await response.json();
-      button.textContent = 'Approved for video direction ✓';
-      window.renderRunwayDirectionPlan?.(data.plan);
-      window.notify?.('Runway direction approved', 'Dee placed the production brief in the Video Edit stage for your review.');
-      deePanel.classList.remove('open');
-      deePanel.setAttribute('aria-hidden', 'true');
-      document.querySelector('.step[data-step="2"]')?.click();
+      button.hidden = true;
+      const approval = document.createElement('section');
+      approval.className = 'dee-direction-approval';
+      const label = document.createElement('span');
+      label.textContent = 'VIDEO DIRECTION SYNOPSIS';
+      const title = document.createElement('strong');
+      title.textContent = data.title || 'Proposed visual direction';
+      const synopsis = document.createElement('p');
+      synopsis.textContent = data.synopsis;
+      const actions = document.createElement('div');
+      const revise = document.createElement('button');
+      revise.type = 'button';
+      revise.className = 'revise';
+      revise.textContent = 'Discuss changes';
+      revise.addEventListener('click', () => {
+        deeInput.value = 'I want to revise the proposed video direction. ';
+        deeInput.focus();
+      });
+      const approve = document.createElement('button');
+      approve.type = 'button';
+      approve.textContent = 'Approve synopsis';
+      approve.addEventListener('click', async () => {
+        approve.disabled = true;
+        revise.disabled = true;
+        approve.textContent = 'Saving detailed Runway direction...';
+        try {
+          const approvedResponse = await deeRequest('/api/dee/video-direction/approve', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: deeProjectId })
+          });
+          const approvedData = await approvedResponse.json();
+          approval.classList.add('approved');
+          approve.textContent = 'Synopsis approved ✓';
+          window.renderRunwayDirectionPlan?.(approvedData.plan);
+          window.notify?.('Video direction approved', 'The detailed Runway instructions are now in the Video Edit stage.');
+          window.setTimeout(() => {
+            deePanel.classList.remove('open');
+            deePanel.setAttribute('aria-hidden', 'true');
+            document.querySelector('.step[data-step="2"]')?.click();
+          }, 500);
+        } catch (error) {
+          deeError.textContent = error.message;
+          approve.disabled = false;
+          revise.disabled = false;
+          approve.textContent = 'Approve synopsis';
+        }
+      });
+      actions.append(revise, approve);
+      approval.append(label, title, synopsis, actions);
+      message.append(approval);
+      deeConversation.scrollTop = deeConversation.scrollHeight;
     } catch (error) {
       deeError.textContent = error.message;
       button.disabled = false;
-      button.textContent = 'Approve for video direction';
+      button.textContent = 'Prepare video direction synopsis';
     }
   });
   message.append(button);

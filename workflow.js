@@ -263,8 +263,9 @@ function attachRealVideo(videoUrl) {
 function renderRunwayDirectionPlan(plan) {
   if (!plan) return;
   document.getElementById('runwayDirectionTitle').textContent = plan.title || 'Approved Runway video direction';
-  document.getElementById('runwayDirectionSummary').textContent = plan.summary || '';
+  document.getElementById('runwayDirectionSummary').textContent = plan.approvalSynopsis || plan.summary || '';
   document.getElementById('runwayDirectionStatus').textContent = 'APPROVED · READY FOR PREVIEWS';
+  document.getElementById('approveSavedRunwaySynopsis').hidden = true;
   document.getElementById('runwayEditorialIntent').textContent = plan.editorialIntent || '';
   document.getElementById('runwayGlobalTreatment').textContent = plan.globalTreatment || '';
   document.getElementById('runwayAudioBrand').textContent = [plan.audioDirection, plan.brandDirection].filter(Boolean).join(' ');
@@ -301,6 +302,14 @@ function renderRunwayDirectionPlan(plan) {
 }
 window.renderRunwayDirectionPlan = renderRunwayDirectionPlan;
 
+function renderRunwayDirectionSynopsis(direction) {
+  if (!direction?.synopsis) return;
+  document.getElementById('runwayDirectionTitle').textContent = direction.title || 'Proposed video direction';
+  document.getElementById('runwayDirectionSummary').textContent = direction.synopsis;
+  document.getElementById('runwayDirectionStatus').textContent = 'SYNOPSIS · AWAITING APPROVAL';
+  document.getElementById('approveSavedRunwaySynopsis').hidden = false;
+}
+
 function renderWorkspace(data) {
   document.title = `${data.project.title} · RHM Studios`;
   const headerTitle = document.querySelector('.project-name strong');
@@ -318,6 +327,7 @@ function renderWorkspace(data) {
   if (duration) duration.textContent = formatWorkspaceTime(data.project.duration_seconds);
   renderPrimaryScripture(data.project.primary_scripture);
   renderRunwayDirectionPlan(data.videoDirection);
+  if (!data.videoDirection) renderRunwayDirectionSynopsis(data.videoDirectionSynopsis);
   const job = (data.jobs || []).find(item => item.job_type === 'transcription');
   if (data.messageReview) renderMessageReview(data.messageReview, data.userDirection);
   else renderProcessingState(job);
@@ -433,6 +443,23 @@ document.getElementById('retryMessageProcessing')?.addEventListener('click', asy
     document.getElementById('messageReviewErrorCopy').textContent = error.message;
   } finally {
     button.disabled = false;
+  }
+});
+
+document.getElementById('approveSavedRunwaySynopsis')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Saving detailed Runway direction...';
+  try {
+    const result = await workspaceRequest('/api/dee/video-direction/approve', {
+      method: 'POST', body: JSON.stringify({ projectId: workspaceProjectId })
+    });
+    renderRunwayDirectionPlan(result.plan);
+    notify('Video direction approved', 'The detailed Runway ranges and prompts are ready for preview planning.');
+  } catch (error) {
+    notify('Approval needs attention', error.message);
+    button.disabled = false;
+    button.textContent = 'Approve synopsis';
   }
 });
 

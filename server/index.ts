@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { adminClient, createRequestClient } from './supabase.js';
 import { recoverInterruptedProcessingJobs, regenerateMessageReview, runQueuedProcessingJobs } from './processing.js';
-import { approveDeeNote, approveDeeVideoDirection, askDee, deleteDeeNote, getDeeMemory, listDeeVoices, synthesizeDeeSpeech, transcribeDeeAudio } from './dee.js';
+import { approveDeeNote, approveDeeVideoDirection, askDee, deleteDeeNote, draftDeeVideoDirection, getDeeMemory, listDeeVoices, synthesizeDeeSpeech, transcribeDeeAudio } from './dee.js';
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -178,10 +178,22 @@ app.post('/api/dee/video-direction', requireUser, async (req, res) => {
   const approvedGuidance = cleanText(req.body?.approvedGuidance, 12000);
   if (!projectId || !approvedGuidance) return res.status(400).json({ error: 'Choose a Dee response from an open project first.' });
   try {
-    res.json(await approveDeeVideoDirection(res.locals.user.id, projectId, approvedGuidance));
+    res.json(await draftDeeVideoDirection(res.locals.user.id, projectId, approvedGuidance));
   } catch (error: any) {
     console.error('Dee Runway direction failed', { message: error?.message });
     res.status(502).json({ error: error?.message || 'Dee could not create the Runway edit direction.' });
+  }
+});
+
+app.post('/api/dee/video-direction/approve', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const projectId = cleanText(req.body?.projectId, 100);
+  if (!projectId) return res.status(400).json({ error: 'Open a devotional project first.' });
+  try {
+    res.json(await approveDeeVideoDirection(res.locals.user.id, projectId));
+  } catch (error: any) {
+    console.error('Dee Runway direction approval failed', { message: error?.message });
+    res.status(400).json({ error: error?.message || 'The Runway direction could not be approved.' });
   }
 });
 
@@ -392,10 +404,15 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
     } catch {}
   }
   let videoDirection = null;
+  let videoDirectionSynopsis = null;
   if (videoDirectionStage?.notes) {
-    try { videoDirection = JSON.parse(videoDirectionStage.notes)?.plan ?? null; } catch {}
+    try {
+      const savedDirection = JSON.parse(videoDirectionStage.notes)?.plan ?? null;
+      if (videoDirectionStage.status === 'approved') videoDirection = savedDirection;
+      else if (savedDirection?.approvalSynopsis) videoDirectionSynopsis = { title: savedDirection.title, synopsis: savedDirection.approvalSynopsis };
+    } catch {}
   }
-  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionStage });
+  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionSynopsis, videoDirectionStage });
 });
 
 app.post('/api/projects/:projectId/message-review', requireUser, async (req, res) => {
