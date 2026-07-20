@@ -1,14 +1,18 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import ffmpeg from '@ffmpeg-installer/ffmpeg';
+import { Upload } from 'tus-js-client';
 import { config } from './config.js';
 import { adminClient } from './supabase.js';
 
 const openaiApiKey = config.openaiApiKey;
 const mediaBucket = 'devotional-media';
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let workerActive = false;
 
 type MessageReview = {
@@ -42,6 +46,102 @@ function timestamp(seconds: number) {
 
 async function updateJob(jobId: string, values: Record<string, unknown>) {
   await adminClient.from('processing_jobs').update(values).eq('id', jobId);
+}
+
+async function uploadRenderedVideo(storagePath: string, filePath: string, onProgress?: (fraction: number) => void) {
+  const file = await stat(filePath);
+  await new Promise<void>((resolve, reject) => {
+    const upload = new Upload(createReadStream(filePath) as any, {
+      endpoint: `${config.supabaseUrl}/storage/v1/upload/resumable`,
+      headers: { authorization: `Bearer ${config.supabaseAdminKey}`, 'x-upsert': 'true' },
+      uploadSize: file.size,
+      chunkSize: 6 * 1024 * 1024,
+      retryDelays: [0, 1000, 3000, 5000, 10000],
+      removeFingerprintOnSuccess: true,
+      metadata: { bucketName: mediaBucket, objectName: storagePath, contentType: 'video/mp4', cacheControl: '3600' },
+      onProgress: (sent, total) => onProgress?.(total ? sent / total : 0),
+      onError: reject,
+      onSuccess: () => resolve()
+    });
+    upload.start();
+  });
+  return file.size;
+}
+
+async function processFullRenderJob(job: { id: string; devotional_id: string; owner_id: string }) {
+  const { id: jobId, devotional_id: devotionalId, owner_id: ownerId } = job;
+  const workDirectory = await mkdtemp(path.join(tmpdir(), 'rhm-full-render-'));
+  try {
+    await updateJob(jobId, { status: 'running', progress: 3, started_at: new Date().toISOString(), error_message: null });
+    const [{ data: project }, { data: asset }] = await Promise.all([
+      adminClient.from('devotionals').select('id,title,primary_scripture,duration_seconds').eq('id', devotionalId).eq('owner_id', ownerId).maybeSingle(),
+      adminClient.from('media_assets').select('id,storage_path').eq('devotional_id', devotionalId).eq('owner_id', ownerId).eq('kind', 'source_video').maybeSingle()
+    ]);
+    if (!project || !asset?.storage_path) throw new Error('The source video could not be found for rendering.');
+    const { data: signed, error: signedError } = await adminClient.storage.from(mediaBucket).createSignedUrl(asset.storage_path, 8 * 60 * 60);
+    if (signedError || !signed?.signedUrl) throw new Error('A private source-video link could not be prepared.');
+
+    const introPath = path.join(projectRoot, 'assets', 'brand', 'intros', 'morning-devotional-intro.mp4');
+    const outroPath = path.join(projectRoot, 'assets', 'brand', 'outros', 'rhm-default-outro.mp4');
+    const logoPath = path.join(projectRoot, 'assets', 'rhm-logo.png');
+    const outputPath = path.join(workDirectory, 'rhm-polished-master.mp4');
+    const scripturePath = path.join(workDirectory, 'scripture.txt');
+    await writeFile(scripturePath, String(project.primary_scripture || '').trim(), 'utf8');
+    const escapedScripturePath = scripturePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+    const totalSeconds = Math.max(83, Number(project.duration_seconds || 0) + 83);
+    const filter = [
+      '[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p,setpts=PTS-STARTPTS[introv]',
+      '[0:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[introa]',
+      '[1:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p,setpts=PTS-STARTPTS[sourcebase]',
+      '[3:v]scale=96:-1,format=rgba,colorchannelmixer=aa=0.82[wm]',
+      `[sourcebase][wm]overlay=W-w-26:H-h-26[sourcewm]`,
+      project.primary_scripture
+        ? `[sourcewm]drawtext=font='DejaVu Sans':textfile='${escapedScripturePath}':fontsize=34:fontcolor=white:x=(w-text_w)/2:y=h-120:box=1:boxcolor=0x061a36CC:boxborderw=18:enable='between(t,2,14)'[sourcev]`
+        : '[sourcewm]null[sourcev]',
+      '[1:a]highpass=f=80,lowpass=f=14500,afftdn=nf=-25,acompressor=threshold=-18dB:ratio=2.5:attack=20:release=250,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[sourcea]',
+      '[2:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p,setpts=PTS-STARTPTS[outrov]',
+      '[2:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[outroa]',
+      '[introv][introa][sourcev][sourcea][outrov][outroa]concat=n=3:v=1:a=1[v][a]'
+    ].join(';');
+    const child = spawn((ffmpeg as { path: string }).path, [
+      '-hide_banner', '-y', '-i', introPath, '-i', signed.signedUrl, '-i', outroPath, '-loop', '1', '-i', logoPath,
+      '-filter_complex', filter, '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest', outputPath
+    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let errorOutput = '';
+    let lastProgress = 3;
+    child.stderr.on('data', chunk => {
+      const text = chunk.toString();
+      errorOutput = (errorOutput + text).slice(-7000);
+      const matches = [...text.matchAll(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/g)];
+      const match = matches[matches.length - 1];
+      if (!match) return;
+      const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+      const progress = Math.min(88, 5 + Math.floor((seconds / totalSeconds) * 83));
+      if (progress >= lastProgress + 2) { lastProgress = progress; void updateJob(jobId, { progress }); }
+    });
+    await new Promise<void>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', code => code === 0 ? resolve() : reject(new Error(`The master-video render stopped. ${errorOutput}`)));
+    });
+
+    await updateJob(jobId, { progress: 92 });
+    const storagePath = `${ownerId}/${devotionalId}/renders/rhm-polished-master.mp4`;
+    const sizeBytes = await uploadRenderedVideo(storagePath, outputPath, fraction => void updateJob(jobId, { progress: Math.min(99, 92 + Math.floor(fraction * 7)) }));
+    await adminClient.from('media_assets').delete().eq('devotional_id', devotionalId).eq('owner_id', ownerId).eq('kind', 'enhanced_video');
+    const { error: assetError } = await adminClient.from('media_assets').insert({
+      devotional_id: devotionalId, owner_id: ownerId, kind: 'enhanced_video', storage_path: storagePath,
+      mime_type: 'video/mp4', size_bytes: sizeBytes, duration_seconds: totalSeconds,
+      metadata: { render_job_id: jobId, render_type: 'polished_master', includes_intro: true, includes_outro: true, includes_audio_cleanup: true, includes_watermark: true, includes_scripture_graphic: Boolean(project.primary_scripture) }
+    });
+    if (assetError) throw assetError;
+    await updateJob(jobId, { status: 'completed', progress: 100, completed_at: new Date().toISOString() });
+  } catch (error: any) {
+    console.error('Full render job failed', { jobId, devotionalId, message: error?.message });
+    await updateJob(jobId, { status: 'failed', error_message: String(error?.message || 'Unknown render error').slice(0, 1000), completed_at: new Date().toISOString() });
+  } finally {
+    await rm(workDirectory, { recursive: true, force: true });
+  }
 }
 
 async function extractAudioChunks(sourceUrl: string, outputDirectory: string) {
@@ -380,12 +480,13 @@ export async function runQueuedProcessingJobs() {
       const { data: jobs, error } = await adminClient
         .from('processing_jobs')
         .select('id,devotional_id,owner_id,job_type')
-        .in('job_type', ['transcription', 'visual_analysis'])
+        .in('job_type', ['transcription', 'visual_analysis', 'full_render'])
         .eq('status', 'queued')
         .order('created_at', { ascending: true })
         .limit(1);
       if (error || !jobs?.length) break;
       if (jobs[0].job_type === 'visual_analysis') await processVisualAnalysisJob(jobs[0]);
+      else if (jobs[0].job_type === 'full_render') await processFullRenderJob(jobs[0]);
       else await processTranscriptionJob(jobs[0]);
     }
   } finally {
@@ -406,7 +507,7 @@ export async function recoverInterruptedProcessingJobs() {
       started_at: null,
       completed_at: null
     })
-    .in('job_type', ['transcription', 'visual_analysis'])
+    .in('job_type', ['transcription', 'visual_analysis', 'full_render'])
     .eq('status', 'running');
   if (error) console.error('Interrupted processing jobs could not be recovered', { message: error.message });
 }

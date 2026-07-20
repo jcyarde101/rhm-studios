@@ -457,8 +457,9 @@ function renderProductionStatus(data) {
   videoStatus.className = video.state === 'ready' ? '' : 'working';
   document.getElementById('finalVideoCopy').textContent = videoJob ? video.copy : 'The edit direction is approved, but the full-quality edited video has not been rendered.';
   const videoPreview = document.getElementById('finalVideoPreview');
-  videoPreview.disabled = true;
-  videoPreview.textContent = video.state === 'ready' ? 'File verification needed' : 'Preview unavailable';
+  videoPreview.disabled = video.state !== 'ready' || !data.enhancedVideoUrl;
+  videoPreview.textContent = video.state === 'ready' && data.enhancedVideoUrl ? 'Preview full video' : video.state === 'ready' ? 'Preparing preview link' : 'Preview unavailable';
+  videoPreview.onclick = data.enhancedVideoUrl ? () => window.open(data.enhancedVideoUrl, '_blank', 'noopener') : null;
   const descriptionApproved = Boolean(data.shortDescription?.approved);
   const descriptionStatus = document.getElementById('finalDescriptionStatus');
   descriptionStatus.textContent = descriptionApproved ? 'APPROVED' : 'AWAITING APPROVAL';
@@ -479,14 +480,15 @@ function setWorkflowStepState(number, approved) {
 
 function renderProductionHandoff(data) {
   const messageApproved = data.messageStage?.status === 'approved';
+  const messageReady = messageApproved || data.messageStage?.status === 'ready';
   const directionApproved = data.videoDirectionStage?.status === 'approved' && Boolean(data.videoDirection);
   const descriptionApproved = Boolean(data.shortDescription?.approved);
-  const ready = messageApproved && directionApproved && descriptionApproved;
+  const ready = messageReady && directionApproved && descriptionApproved;
   const review = data.messageReview || {};
   const direction = data.videoDirection || {};
   const description = data.shortDescription || {};
 
-  setWorkflowStepState(1, messageApproved);
+  setWorkflowStepState(1, messageReady);
   setWorkflowStepState(2, directionApproved);
   setWorkflowStepState(3, descriptionApproved);
   document.getElementById('approveMessageReview').disabled = messageApproved || !data.messageReview;
@@ -505,18 +507,20 @@ function renderProductionHandoff(data) {
     document.getElementById(`handoff${name}Copy`).textContent = copy || 'Return to this step to finish the review.';
     document.getElementById(name === 'Message' ? 'handoffScripture' : `handoff${name}Details`).textContent = detail || '';
   };
-  fill('Message', messageApproved, review.centralMessage || 'Message review', review.overallSynopsis, data.project.primary_scripture ? `Foundational Scripture: ${data.project.primary_scripture}` : 'No foundational Scripture saved.');
+  fill('Message', messageReady, review.centralMessage || 'Message review', review.overallSynopsis, `${messageApproved ? '' : 'Your earlier Step 1 decision will be permanently confirmed when you start the render. '}${data.project.primary_scripture ? `Foundational Scripture: ${data.project.primary_scripture}` : 'No foundational Scripture saved.'}`);
   fill('Direction', directionApproved, direction.title || data.videoDirectionSynopsis?.title || 'Video direction', direction.approvalSynopsis || data.videoDirectionSynopsis?.synopsis, direction.scenes?.length ? `${direction.scenes.length} focused Runway/B-roll ranges · audio, Scripture graphics, and RHM branding included` : 'Approve Dee\'s synopsis to save the detailed production direction.');
   fill('Description', descriptionApproved, description.title || 'Video description', (description.paragraphs || []).join(' '), description.foundationalScripture ? `Foundational Scripture: ${description.foundationalScripture}` : 'Transcript-based posting copy.');
 
   const renderJob = findProductionJob(data.jobs || [], ['full_render', 'video_render', 'runway_render', 'render']);
-  const canStart = false;
+  const renderBlocksStart = Boolean(renderJob && ['queued', 'running', 'completed'].includes(renderJob.status));
+  const canStart = ready && !renderBlocksStart;
   const startButton = document.getElementById('startFullRender');
   startButton.disabled = !canStart;
-  document.getElementById('renderStartTitle').textContent = renderJob ? 'The full video render has already been submitted.' : ready ? 'Your production handoff is approved and ready for the render connection.' : 'Finish the approvals marked above.';
-  document.getElementById('renderStartCopy').textContent = renderJob ? 'Use the live status above to follow the job.' : ready ? 'The button will activate when the real Runway/FFmpeg worker is connected; it will not create a job that stays at 0%.' : 'Nothing will be submitted or charged until all three approvals are saved.';
-  document.getElementById('renderStartBar').hidden = Boolean(renderJob);
-  document.getElementById('finalApprovalBar').hidden = !renderJob;
+  document.getElementById('renderStartTitle').textContent = renderBlocksStart ? 'The full video render has already been submitted.' : renderJob?.status === 'failed' ? 'The previous render stopped. You can safely try again.' : ready ? 'Everything is approved. You control when production begins.' : 'Finish the approvals marked above.';
+  document.getElementById('renderStartCopy').textContent = renderBlocksStart ? 'Use the live status above to follow the job.' : ready ? 'Starting submits the approved production plan. It will not publish the video.' : 'Nothing will be submitted until all three approvals are saved.';
+  startButton.textContent = renderJob?.status === 'failed' ? 'Retry full video render' : 'Start full video render';
+  document.getElementById('renderStartBar').hidden = renderBlocksStart;
+  document.getElementById('finalApprovalBar').hidden = renderJob?.status !== 'completed';
   return ready;
 }
 
@@ -699,6 +703,21 @@ document.getElementById('approveMessageReview')?.addEventListener('click', async
 document.getElementById('continueFromDirection')?.addEventListener('click', () => showStep(3));
 document.getElementById('continueFromDescription')?.addEventListener('click', () => showStep(4));
 document.querySelectorAll('[data-return-step]').forEach(button => button.addEventListener('click', () => showStep(Number(button.dataset.returnStep))));
+document.getElementById('startFullRender')?.addEventListener('click', async event => {
+  if (!window.confirm('Start the full video render now?\n\nThis begins the approved master-video production process. It will not publish the video.')) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Submitting render...';
+  try {
+    const result = await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/render/start`, { method: 'POST' });
+    notify('Full video render submitted', result.message);
+    await loadRealWorkspace();
+  } catch (error) {
+    notify('Render could not start', error.message);
+    button.disabled = false;
+    button.textContent = 'Start full video render';
+  }
+});
 document.getElementById('startVisualAnalysis')?.addEventListener('click', async event => {
   const button = event.currentTarget;
   button.disabled = true;

@@ -416,10 +416,16 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
   if (projectError || !project) return res.status(404).json({ error: 'This video project could not be found.' });
 
   const source = (project.media_assets || []).find((asset: any) => asset.kind === 'source_video' && asset.metadata?.upload_state === 'complete');
+  const enhancedVideo = (project.media_assets || []).find((asset: any) => asset.kind === 'enhanced_video');
   let videoUrl: string | null = null;
+  let enhancedVideoUrl: string | null = null;
   if (source?.storage_path) {
     const { data: signed } = await adminClient.storage.from(videoBucket).createSignedUrl(source.storage_path, 60 * 60);
     videoUrl = signed?.signedUrl ?? null;
+  }
+  if (enhancedVideo?.storage_path) {
+    const { data: signed } = await adminClient.storage.from(videoBucket).createSignedUrl(enhancedVideo.storage_path, 60 * 60);
+    enhancedVideoUrl = signed?.signedUrl ?? null;
   }
   let messageReview: Record<string, unknown> | null = null;
   let userDirection = '';
@@ -441,7 +447,7 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
   }
   const parsedShortDescription = parseShortDescription(shortDescriptionOutput?.content);
   const shortDescription = parsedShortDescription ? { ...parsedShortDescription, approved: Boolean(shortDescriptionOutput?.approved), updatedAt: shortDescriptionOutput?.updated_at } : null;
-  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionSynopsis, videoDirectionStage, visualAnalysis, shortDescription });
+  res.json({ project, source, videoUrl, enhancedVideo, enhancedVideoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionSynopsis, videoDirectionStage, visualAnalysis, shortDescription });
 });
 
 app.post('/api/projects/:projectId/writing/short-description', requireUser, async (req, res) => {
@@ -504,6 +510,44 @@ app.post('/api/projects/:projectId/message-review/approve', requireUser, async (
     action: 'approved', comment: 'Creator approved the transcript message review and direction.', snapshot
   });
   res.json({ stage: approved });
+});
+
+app.post('/api/projects/:projectId/render/start', requireUser, async (req, res) => {
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const [{ data: project }, { data: stages }, { data: description }, { data: existingJobs }] = await Promise.all([
+    adminClient.from('devotionals').select('id,title,media_assets(id,kind,metadata)').eq('id', projectId).eq('owner_id', ownerId).maybeSingle(),
+    adminClient.from('workflow_stages').select('stage,status').eq('devotional_id', projectId).eq('owner_id', ownerId).in('stage', ['message', 'video_direction']),
+    adminClient.from('written_outputs').select('approved').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('kind', 'short_description').eq('version', 1).maybeSingle(),
+    adminClient.from('processing_jobs').select('id,status,progress').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('job_type', 'full_render').order('created_at', { ascending: false }).limit(1)
+  ]);
+  if (!project) return res.status(404).json({ error: 'This video project could not be found.' });
+  const existingJob = existingJobs?.[0];
+  if (existingJob && ['queued', 'running', 'completed'].includes(existingJob.status)) return res.status(409).json({ error: 'The full video render has already been submitted.', job: existingJob });
+  const sourceReady = (project.media_assets || []).some((asset: any) => asset.kind === 'source_video' && asset.metadata?.upload_state === 'complete');
+  const stageMap = new Map((stages || []).map((stage: any) => [stage.stage, stage.status]));
+  const messageReady = ['ready', 'approved'].includes(String(stageMap.get('message') || ''));
+  const missing = [
+    messageReady ? null : 'message review',
+    stageMap.get('video_direction') === 'approved' ? null : 'video direction',
+    description?.approved ? null : 'video description',
+    sourceReady ? null : 'source video'
+  ].filter(Boolean);
+  if (missing.length) return res.status(409).json({ error: `Finish these items before rendering: ${missing.join(', ')}.` });
+  if (stageMap.get('message') === 'ready') {
+    await adminClient.from('workflow_stages').update({ status: 'approved', approved_at: new Date().toISOString(), approved_by: ownerId })
+      .eq('devotional_id', projectId).eq('owner_id', ownerId).eq('stage', 'message');
+  }
+  const { data: job, error } = await adminClient.from('processing_jobs').insert({
+    devotional_id: projectId, owner_id: ownerId, job_type: 'full_render', provider: 'runway+ffmpeg', status: 'queued', progress: 1
+  }).select('id,job_type,status,progress,created_at').single();
+  if (error || !job) return res.status(500).json({ error: 'The full video render request could not be saved.' });
+  await adminClient.from('workflow_stages').upsert({
+    devotional_id: projectId, owner_id: ownerId, stage: 'final', status: 'ready', approved_at: null, approved_by: null,
+    notes: JSON.stringify({ renderJobId: job.id, requestedAt: new Date().toISOString(), title: project.title })
+  }, { onConflict: 'devotional_id,stage' });
+  if (config.processingWorkerEnabled) void runQueuedProcessingJobs();
+  res.status(202).json({ job, message: 'Your approved full-video render has been submitted.' });
 });
 
 app.post('/api/projects/:projectId/message-review', requireUser, async (req, res) => {
