@@ -69,7 +69,8 @@ async function uploadRenderedVideo(storagePath: string, filePath: string, onProg
 }
 
 async function runFfmpegStage(args: string[], onTime?: (seconds: number) => void) {
-  const child = spawn((ffmpeg as { path: string }).path, ['-hide_banner', '-y', '-threads', '1', '-filter_threads', '1', '-filter_complex_threads', '1', ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const threads = process.env.RHM_RENDER_COMPANION === 'true' ? Math.max(1, Number(process.env.RHM_RENDER_THREADS || 8)) : 1;
+  const child = spawn((ffmpeg as { path: string }).path, ['-hide_banner', '-y', '-threads', String(threads), '-filter_threads', String(Math.min(threads, 4)), '-filter_complex_threads', String(Math.min(threads, 4)), ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
   let errorOutput = '';
   child.stderr.on('data', chunk => {
     const text = chunk.toString();
@@ -105,8 +106,11 @@ async function processFullRenderJob(job: { id: string; devotional_id: string; ow
     const introOutput = path.join(workDirectory, '01-intro.mp4');
     const sourceOutput = path.join(workDirectory, '02-source.mp4');
     const outroOutput = path.join(workDirectory, '03-outro.mp4');
-    const videoFilter = 'scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p';
-    const commonOutput = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-profile:v', 'main', '-level', '3.1', '-g', '60', '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart'];
+    const companionMode = process.env.RHM_RENDER_COMPANION === 'true';
+    const width = companionMode ? 1920 : 854;
+    const height = companionMode ? 1080 : 480;
+    const videoFilter = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p`;
+    const commonOutput = ['-c:v', 'libx264', '-preset', companionMode ? 'fast' : 'veryfast', '-crf', companionMode ? '20' : '22', '-profile:v', 'main', '-level', companionMode ? '4.1' : '3.1', '-g', '60', '-c:a', 'aac', '-b:a', companionMode ? '192k' : '128k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart'];
 
     await runFfmpegStage(['-i', introPath, '-vf', videoFilter, '-af', 'aformat=sample_rates=48000:channel_layouts=stereo', ...commonOutput, introOutput]);
     await updateJob(jobId, { progress: 9 });
@@ -136,7 +140,7 @@ async function processFullRenderJob(job: { id: string; devotional_id: string; ow
     const { error: assetError } = await adminClient.from('media_assets').insert({
       devotional_id: devotionalId, owner_id: ownerId, kind: 'enhanced_video', storage_path: storagePath,
       mime_type: 'video/mp4', size_bytes: sizeBytes, duration_seconds: totalSeconds,
-      metadata: { render_job_id: jobId, render_type: 'polished_master', includes_intro: true, includes_outro: true, includes_audio_cleanup: true, includes_watermark: true, includes_scripture_graphic: false }
+      metadata: { render_job_id: jobId, render_type: 'polished_master', render_worker: companionMode ? 'rhm-local-companion' : 'server', output_resolution: `${width}x${height}`, includes_intro: true, includes_outro: true, includes_audio_cleanup: true, includes_watermark: true, includes_scripture_graphic: false }
     });
     if (assetError) throw assetError;
     await updateJob(jobId, { status: 'completed', progress: 100, completed_at: new Date().toISOString() });
@@ -484,13 +488,12 @@ export async function runQueuedProcessingJobs() {
       const { data: jobs, error } = await adminClient
         .from('processing_jobs')
         .select('id,devotional_id,owner_id,job_type')
-        .in('job_type', ['transcription', 'visual_analysis', 'full_render'])
+        .in('job_type', ['transcription', 'visual_analysis'])
         .eq('status', 'queued')
         .order('created_at', { ascending: true })
         .limit(1);
       if (error || !jobs?.length) break;
       if (jobs[0].job_type === 'visual_analysis') await processVisualAnalysisJob(jobs[0]);
-      else if (jobs[0].job_type === 'full_render') await processFullRenderJob(jobs[0]);
       else await processTranscriptionJob(jobs[0]);
     }
   } finally {
@@ -511,9 +514,26 @@ export async function recoverInterruptedProcessingJobs() {
       started_at: null,
       completed_at: null
     })
-    .in('job_type', ['transcription', 'visual_analysis', 'full_render'])
+    .in('job_type', ['transcription', 'visual_analysis'])
     .eq('status', 'running');
   if (error) console.error('Interrupted processing jobs could not be recovered', { message: error.message });
+}
+
+export async function recoverInterruptedFullRenderJobs() {
+  const { error } = await adminClient.from('processing_jobs').update({
+    status: 'queued', progress: 1, error_message: 'The local render companion safely resumed this job.', started_at: null, completed_at: null
+  }).eq('job_type', 'full_render').eq('status', 'running');
+  if (error) throw new Error(`Interrupted local render jobs could not be recovered: ${error.message}`);
+}
+
+export async function runNextQueuedFullRenderJob() {
+  const { data: jobs, error } = await adminClient.from('processing_jobs')
+    .select('id,devotional_id,owner_id,job_type').eq('job_type', 'full_render').eq('status', 'queued')
+    .order('created_at', { ascending: true }).limit(1);
+  if (error) throw new Error(`The local render queue could not be checked: ${error.message}`);
+  if (!jobs?.length) return false;
+  await processFullRenderJob(jobs[0]);
+  return true;
 }
 
 export async function regenerateMessageReview(devotionalId: string, ownerId: string, transcript: string, userDirection: string) {

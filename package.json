@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch server/index.ts",
     "start": "tsx server/index.ts",
+    "render:worker": "node --use-system-ca --import tsx server/render-companion.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
