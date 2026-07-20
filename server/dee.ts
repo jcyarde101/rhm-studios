@@ -144,7 +144,7 @@ async function createDeeNote(ownerId: string, projectId: string, userMessage: st
   return data;
 }
 
-export async function askDee(ownerId: string, message: string, projectId?: string, _history: ChatTurn[] = []) {
+export async function askDee(ownerId: string, message: string, projectId?: string, _history: ChatTurn[] = [], onDelta?: (delta: string) => void) {
   requireOpenAI();
   const context = await loadDeeContext(ownerId, projectId);
   if (!context.project) throw new Error('Open a devotional project before asking Dee about it.');
@@ -170,7 +170,8 @@ export async function askDee(ownerId: string, message: string, projectId?: strin
     body: JSON.stringify({
       model: 'gpt-5.6-terra',
       reasoning: { effort: 'medium' },
-      max_output_tokens: 1800,
+      max_output_tokens: 8000,
+      stream: Boolean(onDelta),
       tools: [{ type: 'web_search' }],
       instructions: `You are Dee (D-E-E), the creator's warm, discerning associate-minister-style sounding board and ministry life coach inside RHM Studios.
 
@@ -192,8 +193,40 @@ Speak naturally, usually in a few focused paragraphs unless asked for depth. Ask
       ]
     })
   });
-  const body = await response.json().catch(() => ({})) as any;
-  const reply = responseText(body);
+  let body: any = {};
+  let streamedReply = '';
+  if (onDelta) {
+    if (!response.ok || !response.body) {
+      body = await response.json().catch(() => ({}));
+    } else {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finished = false;
+      while (!finished) {
+        const chunk = await reader.read();
+        finished = chunk.done;
+        buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !finished });
+        const blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop() || '';
+        for (const block of blocks) {
+          const data = block.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('\n');
+          if (!data || data === '[DONE]') continue;
+          let event: any;
+          try { event = JSON.parse(data); } catch { continue; }
+          if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+            streamedReply += event.delta;
+            onDelta(event.delta);
+          }
+          if (event.type === 'response.completed' && event.response) body = event.response;
+          if (event.type === 'response.failed') body = event.response || event;
+        }
+      }
+    }
+  } else {
+    body = await response.json().catch(() => ({}));
+  }
+  const reply = streamedReply || responseText(body);
   if (!response.ok || !reply) throw new Error(body?.error?.message || `Dee could not respond (${response.status}).`);
   const cleanReply = String(reply).trim();
   const sources = responseSources(body);
@@ -233,12 +266,12 @@ export async function synthesizeDeeSpeech(text: string, requestedVoiceId?: strin
   requireElevenLabs();
   const voiceId = requestedVoiceId || config.elevenLabsVoiceId;
   if (!voiceId || !/^[A-Za-z0-9_-]{8,64}$/.test(voiceId)) throw new Error('Choose an ElevenLabs voice for Dee first.');
-  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
+  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=mp3_44100_128`, {
     method: 'POST',
     headers: { 'xi-api-key': config.elevenLabsApiKey, 'content-type': 'application/json' },
     body: JSON.stringify({
-      text: text.slice(0, 2500),
-      model_id: 'eleven_multilingual_v2',
+      text: text.slice(0, 4000),
+      model_id: 'eleven_flash_v2_5',
       voice_settings: { stability: 0.55, similarity_boost: 0.75, style: 0.2, use_speaker_boost: true }
     })
   });

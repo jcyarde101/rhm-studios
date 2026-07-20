@@ -18,6 +18,10 @@ let deeBusy = false;
 let deeRecorder = null;
 let deeRecordingChunks = [];
 let deeAudioUrl = null;
+let deeSpeechQueue = [];
+let deeSpeechRunning = false;
+let deeSpeechGeneration = 0;
+let deeSpeechFinish = null;
 
 async function deeRequest(url, options = {}) {
   const response = await fetch(url, options);
@@ -145,7 +149,7 @@ async function loadDeeMemory(renderConversation = true) {
   }
 }
 
-async function speakAsDee(text) {
+async function createDeeSpeech(text, generation) {
   if (!deeVoiceReady || !deeVoice.value) return;
   const response = await deeRequest('/api/dee/speak', {
     method: 'POST',
@@ -153,10 +157,80 @@ async function speakAsDee(text) {
     body: JSON.stringify({ text, voiceId: deeVoice.value })
   });
   const audioBlob = await response.blob();
+  if (generation !== deeSpeechGeneration) return null;
+  return audioBlob;
+}
+
+async function playDeeSpeech(audioBlob, generation) {
+  if (!audioBlob || generation !== deeSpeechGeneration) return;
   if (deeAudioUrl) URL.revokeObjectURL(deeAudioUrl);
   deeAudioUrl = URL.createObjectURL(audioBlob);
   deeAudio.src = deeAudioUrl;
-  await deeAudio.play().catch(() => {});
+  await deeAudio.play();
+  await new Promise(resolve => {
+    const finish = () => {
+      deeAudio.removeEventListener('ended', finish);
+      deeAudio.removeEventListener('error', finish);
+      if (deeSpeechFinish === finish) deeSpeechFinish = null;
+      resolve();
+    };
+    deeSpeechFinish = finish;
+    deeAudio.addEventListener('ended', finish, { once: true });
+    deeAudio.addEventListener('error', finish, { once: true });
+  });
+}
+
+async function drainDeeSpeechQueue() {
+  if (deeSpeechRunning) return;
+  deeSpeechRunning = true;
+  try {
+    while (deeSpeechQueue.length) {
+      const item = deeSpeechQueue.shift();
+      try {
+        const audioBlob = await item.audio;
+        await playDeeSpeech(audioBlob, item.generation);
+      } catch (error) {
+        if (item.generation === deeSpeechGeneration) deeError.textContent = `Dee is continuing in text, but one voice segment could not play: ${error.message}`;
+      }
+    }
+  } finally {
+    deeSpeechRunning = false;
+    if (deeSpeechQueue.length) void drainDeeSpeechQueue();
+  }
+}
+
+function resetDeeSpeech() {
+  deeSpeechGeneration += 1;
+  deeSpeechQueue = [];
+  deeSpeechFinish?.();
+  deeAudio.pause();
+  deeAudio.removeAttribute('src');
+  deeAudio.load();
+  if (deeAudioUrl) URL.revokeObjectURL(deeAudioUrl);
+  deeAudioUrl = null;
+}
+
+function enqueueDeeSpeech(text) {
+  const spokenText = String(text || '').trim();
+  if (!spokenText || !deeVoiceReady || !deeVoice.value) return;
+  const generation = deeSpeechGeneration;
+  deeSpeechQueue.push({ generation, audio: createDeeSpeech(spokenText, generation) });
+  void drainDeeSpeechQueue();
+}
+
+function queueCompleteSpeechChunks(buffer, final = false) {
+  let remaining = buffer;
+  while (remaining.length) {
+    const searchArea = remaining.slice(0, 700);
+    const boundaries = [...searchArea.matchAll(/[.!?](?:["'”’)]*)\s+/g)].filter(match => match.index >= 100);
+    let end = boundaries.length ? boundaries[0].index + boundaries[0][0].length : -1;
+    if (end < 0 && remaining.length > 650) end = remaining.lastIndexOf(' ', 650);
+    if (end < 0 && final) end = remaining.length;
+    if (end < 0) break;
+    enqueueDeeSpeech(remaining.slice(0, end));
+    remaining = remaining.slice(end);
+  }
+  return remaining;
 }
 
 async function askDee(message) {
@@ -167,31 +241,64 @@ async function askDee(message) {
   addDeeMessage('user', question);
   deeHistory.push({ role: 'user', content: question });
   deeInput.value = '';
+  resetDeeSpeech();
   const thinking = addDeeMessage('assistant', 'Let me look at the project and transcript…', 'thinking');
   setDeeBusy(true);
   try {
-    const response = await deeRequest('/api/dee/chat', {
+    const response = await deeRequest('/api/dee/chat-stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectId: deeProjectId, message: question, history: priorHistory })
     });
-    const data = await response.json();
+    if (!response.body) throw new Error('This browser could not open Dee’s live response stream.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let lineBuffer = '';
+    let speechBuffer = '';
+    let fullReply = '';
+    let doneData = null;
+    let receivedText = false;
+    while (true) {
+      const chunk = await reader.read();
+      lineBuffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
+      const lines = lineBuffer.split(/\r?\n/);
+      lineBuffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let event;
+        try { event = JSON.parse(line); } catch { continue; }
+        if (event.type === 'error') throw new Error(event.error || 'Dee could not finish her response.');
+        if (event.type === 'delta' && typeof event.delta === 'string') {
+          if (!receivedText) {
+            receivedText = true;
+            thinking.classList.remove('thinking');
+            thinking.querySelector('p').textContent = '';
+          }
+          fullReply += event.delta;
+          thinking.querySelector('p').textContent = fullReply;
+          deeConversation.scrollTop = deeConversation.scrollHeight;
+          speechBuffer += event.delta;
+          speechBuffer = queueCompleteSpeechChunks(speechBuffer);
+        }
+        if (event.type === 'done') doneData = event;
+      }
+      if (chunk.done) break;
+    }
+    queueCompleteSpeechChunks(speechBuffer, true);
+    const reply = doneData?.reply || fullReply;
+    if (!reply) throw new Error('Dee’s response ended before any text arrived. Please try again.');
     thinking.classList.remove('thinking');
-    thinking.querySelector('p').textContent = data.reply;
-    if (data.sources?.length) {
-      data.sources.forEach(source => {
+    thinking.querySelector('p').textContent = reply;
+    if (doneData?.sources?.length) {
+      const sourceList = document.createElement('div');
+      sourceList.className = 'dee-message-sources';
+      const label = document.createElement('strong');
+      label.textContent = 'Current-event sources';
+      sourceList.append(label);
+      doneData.sources.forEach(source => {
         try {
           const url = new URL(source.url);
           if (!['http:', 'https:'].includes(url.protocol)) return;
-          let sourceList = thinking.querySelector('.dee-message-sources');
-          if (!sourceList) {
-            sourceList = document.createElement('div');
-            sourceList.className = 'dee-message-sources';
-            const label = document.createElement('strong');
-            label.textContent = 'Current-event sources';
-            sourceList.append(label);
-            thinking.append(sourceList);
-          }
           const link = document.createElement('a');
           link.href = url.href;
           link.target = '_blank';
@@ -200,10 +307,10 @@ async function askDee(message) {
           sourceList.append(link);
         } catch {}
       });
+      if (sourceList.children.length > 1) thinking.append(sourceList);
     }
-    deeHistory.push({ role: 'assistant', content: data.reply });
-    if (data.note) await loadDeeMemory(false);
-    await speakAsDee(data.reply).catch(error => { deeError.textContent = `Dee answered in text, but her voice could not play: ${error.message}`; });
+    deeHistory.push({ role: 'assistant', content: reply });
+    if (doneData?.note) await loadDeeMemory(false);
   } catch (error) {
     thinking.remove();
     deeError.textContent = error.message;

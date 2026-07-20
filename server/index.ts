@@ -148,6 +148,30 @@ app.post('/api/dee/chat', requireUser, async (req, res) => {
   }
 });
 
+app.post('/api/dee/chat-stream', requireUser, async (req, res) => {
+  const message = cleanText(req.body?.message, 5000);
+  const projectId = cleanText(req.body?.projectId, 100) || undefined;
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  if (!message) return res.status(400).json({ error: 'Ask Dee a question first.' });
+  res.status(200);
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  const send = (event: Record<string, unknown>) => res.write(`${JSON.stringify(event)}\n`);
+  send({ type: 'ready' });
+  try {
+    const result = await askDee(res.locals.user.id, message, projectId, history, delta => send({ type: 'delta', delta }));
+    send({ type: 'done', reply: result.reply, note: result.note, sources: result.sources, mode: 'read_only', memoryWindowDays: 7 });
+  } catch (error: any) {
+    console.error('Dee streaming response failed', { message: error?.message });
+    send({ type: 'error', error: error?.message || 'Dee could not finish her response.' });
+  } finally {
+    res.end();
+  }
+});
+
 app.get('/api/dee/memory', requireUser, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const projectId = cleanText(req.query.projectId, 100);
@@ -177,7 +201,7 @@ app.delete('/api/dee/notes/:noteId', requireUser, async (req, res) => {
 });
 
 app.post('/api/dee/speak', requireUser, async (req, res) => {
-  const text = cleanText(req.body?.text, 2500);
+  const text = cleanText(req.body?.text, 4000);
   const voiceId = cleanText(req.body?.voiceId, 100) || undefined;
   if (!text) return res.status(400).json({ error: 'There is no response for Dee to speak.' });
   try {
