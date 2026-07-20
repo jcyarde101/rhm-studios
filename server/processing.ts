@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -85,19 +85,13 @@ async function processFullRenderJob(job: { id: string; devotional_id: string; ow
     const outroPath = path.join(projectRoot, 'assets', 'brand', 'outros', 'rhm-default-outro.mp4');
     const logoPath = path.join(projectRoot, 'assets', 'rhm-logo.png');
     const outputPath = path.join(workDirectory, 'rhm-polished-master.mp4');
-    const scripturePath = path.join(workDirectory, 'scripture.txt');
-    await writeFile(scripturePath, String(project.primary_scripture || '').trim(), 'utf8');
-    const escapedScripturePath = scripturePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
     const totalSeconds = Math.max(83, Number(project.duration_seconds || 0) + 83);
     const filter = [
       '[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p,setpts=PTS-STARTPTS[introv]',
       '[0:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[introa]',
       '[1:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p,setpts=PTS-STARTPTS[sourcebase]',
       '[3:v]scale=96:-1,format=rgba,colorchannelmixer=aa=0.82[wm]',
-      `[sourcebase][wm]overlay=W-w-26:H-h-26[sourcewm]`,
-      project.primary_scripture
-        ? `[sourcewm]drawtext=font='DejaVu Sans':textfile='${escapedScripturePath}':fontsize=34:fontcolor=white:x=(w-text_w)/2:y=h-120:box=1:boxcolor=0x061a36CC:boxborderw=18:enable='between(t,2,14)'[sourcev]`
-        : '[sourcewm]null[sourcev]',
+      '[sourcebase][wm]overlay=W-w-26:H-h-26[sourcev]',
       '[1:a]highpass=f=80,lowpass=f=14500,afftdn=nf=-25,acompressor=threshold=-18dB:ratio=2.5:attack=20:release=250,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[sourcea]',
       '[2:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p,setpts=PTS-STARTPTS[outrov]',
       '[2:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[outroa]',
@@ -132,13 +126,13 @@ async function processFullRenderJob(job: { id: string; devotional_id: string; ow
     const { error: assetError } = await adminClient.from('media_assets').insert({
       devotional_id: devotionalId, owner_id: ownerId, kind: 'enhanced_video', storage_path: storagePath,
       mime_type: 'video/mp4', size_bytes: sizeBytes, duration_seconds: totalSeconds,
-      metadata: { render_job_id: jobId, render_type: 'polished_master', includes_intro: true, includes_outro: true, includes_audio_cleanup: true, includes_watermark: true, includes_scripture_graphic: Boolean(project.primary_scripture) }
+      metadata: { render_job_id: jobId, render_type: 'polished_master', includes_intro: true, includes_outro: true, includes_audio_cleanup: true, includes_watermark: true, includes_scripture_graphic: false }
     });
     if (assetError) throw assetError;
     await updateJob(jobId, { status: 'completed', progress: 100, completed_at: new Date().toISOString() });
   } catch (error: any) {
     console.error('Full render job failed', { jobId, devotionalId, message: error?.message });
-    await updateJob(jobId, { status: 'failed', error_message: String(error?.message || 'Unknown render error').slice(0, 1000), completed_at: new Date().toISOString() });
+    await updateJob(jobId, { status: 'failed', error_message: String(error?.message || 'Unknown render error').slice(-3000), completed_at: new Date().toISOString() });
   } finally {
     await rm(workDirectory, { recursive: true, force: true });
   }
