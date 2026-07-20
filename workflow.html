@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="workflow.css">
   <link rel="stylesheet" href="workflow-image.css">
   <link rel="stylesheet" href="workflow-message-review.css">
+  <link rel="stylesheet" href="dee-agent.css">
   <link rel="stylesheet" href="rhm-brand.css">
   <link rel="stylesheet" href="brand-media.css">
 </head>
@@ -91,5 +92,16 @@
     </main>
   </div>
   <div class="toast" id="toast"><span>✓</span><p><strong>Stage approved</strong><small>Your choices are saved. Preparing the next review.</small></p></div>
-  <script src="workflow.js"></script><script src="session.js"></script>
+  <button class="dee-launcher" id="deeLauncher" type="button" aria-label="Talk with Dee"><span>D</span><i></i><b>Ask Dee</b></button>
+  <aside class="dee-panel" id="deePanel" aria-hidden="true">
+    <header><div class="dee-avatar"><span>D</span><i></i></div><div><strong>Dee</strong><small id="deeStatus">STUDIO ASSISTANT · READ ONLY</small></div><button id="deeClose" type="button" aria-label="Close Dee">×</button></header>
+    <div class="dee-scope"><span>SAFE START</span><p>Dee can explain, summarize, and recommend. She cannot approve, publish, delete, or spend without your permission.</p></div>
+    <div class="dee-voice-row"><label for="deeVoice">ElevenLabs voice</label><select id="deeVoice"><option value="">Loading voices...</option></select><button id="previewDeeVoice" type="button">▶ Preview</button></div>
+    <div class="dee-conversation" id="deeConversation" aria-live="polite"><div class="dee-message assistant"><span>D</span><p>Hello, I’m Dee. Ask me what this devotional communicates, what needs clarity, or what I would address first.</p></div></div>
+    <div class="dee-quick-prompts"><button type="button">Give me the synopsis</button><button type="button">What needs clarity?</button><button type="button">What should I fix first?</button></div>
+    <div class="dee-error" id="deeError" role="alert"></div>
+    <div class="dee-composer"><textarea id="deeInput" rows="2" placeholder="Ask Dee about this devotional..."></textarea><button class="dee-mic" id="deeMic" type="button" aria-label="Speak to Dee"><span>●</span><small>Talk</small></button><button class="dee-send" id="deeSend" type="button">Send</button></div>
+    <audio id="deeAudio" hidden></audio>
+  </aside>
+  <script src="workflow.js"></script><script src="dee-agent.js"></script><script src="session.js"></script>
 </body></html>

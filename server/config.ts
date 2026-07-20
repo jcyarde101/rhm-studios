@@ -15,5 +15,7 @@ export const config = {
   supabasePublishableKey: process.env.SUPABASE_PUBLISHABLE_KEY?.trim() || required('SUPABASE_ANON_KEY'),
   supabaseAdminKey: process.env.SUPABASE_SECRET_KEY?.trim() || required('SUPABASE_SERVICE_ROLE_KEY'),
   openaiApiKey: process.env.OPENAI_API_KEY?.trim() || '',
+  elevenLabsApiKey: process.env.ELEVENLABS_API_KEY?.trim() || '',
+  elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID?.trim() || '',
   adminEmails: new Set((process.env.RHM_ADMIN_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean))
 };

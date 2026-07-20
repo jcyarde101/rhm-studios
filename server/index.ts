@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { adminClient, createRequestClient } from './supabase.js';
 import { regenerateMessageReview, runQueuedProcessingJobs } from './processing.js';
+import { askDee, listDeeVoices, synthesizeDeeSpeech, transcribeDeeAudio } from './dee.js';
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -14,7 +15,7 @@ app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 
 const publicFiles = [
-  'styles.css', 'app.js', 'workflow.css', 'workflow-image.css', 'workflow-message-review.css', 'workflow.js',
+  'styles.css', 'app.js', 'workflow.css', 'workflow-image.css', 'workflow-message-review.css', 'dee-agent.css', 'workflow.js', 'dee-agent.js',
   'library.css', 'library.js', 'rhm-brand.css', 'brand-media.css', 'session.js',
   'auth.css', 'auth.js'
 ];
@@ -93,6 +94,67 @@ app.get('/api/me', requireUser, async (_req, res) => {
   const user = res.locals.user;
   const { data: profile } = await adminClient.from('profiles').select('display_name,avatar_url,role').eq('id', user.id).single();
   res.json({ id: user.id, email: user.email, displayName: profile?.display_name ?? user.email, avatarUrl: profile?.avatar_url ?? null, role: profile?.role ?? 'creator' });
+});
+
+app.get('/api/dee/status', requireUser, (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    name: 'Dee',
+    mode: 'read_only',
+    textReady: Boolean(config.openaiApiKey),
+    voiceReady: Boolean(config.elevenLabsApiKey),
+    defaultVoiceConfigured: Boolean(config.elevenLabsVoiceId)
+  });
+});
+
+app.get('/api/dee/voices', requireUser, async (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    res.json(await listDeeVoices());
+  } catch (error: any) {
+    console.error('ElevenLabs voice list failed', { message: error?.message });
+    res.status(502).json({ error: error?.message || 'Dee could not load ElevenLabs voices.' });
+  }
+});
+
+app.post('/api/dee/transcribe', requireUser, express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '25mb' }), async (req, res) => {
+  try {
+    const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const text = await transcribeDeeAudio(bytes, req.get('content-type') || 'audio/webm');
+    res.json({ text });
+  } catch (error: any) {
+    console.error('Dee microphone transcription failed', { message: error?.message });
+    res.status(502).json({ error: error?.message || 'Dee could not understand the recording.' });
+  }
+});
+
+app.post('/api/dee/chat', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const message = cleanText(req.body?.message, 5000);
+  const projectId = cleanText(req.body?.projectId, 100) || undefined;
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  if (!message) return res.status(400).json({ error: 'Ask Dee a question first.' });
+  try {
+    const reply = await askDee(res.locals.user.id, message, projectId, history);
+    res.json({ reply, mode: 'read_only' });
+  } catch (error: any) {
+    console.error('Dee response failed', { message: error?.message });
+    res.status(502).json({ error: error?.message || 'Dee could not respond.' });
+  }
+});
+
+app.post('/api/dee/speak', requireUser, async (req, res) => {
+  const text = cleanText(req.body?.text, 2500);
+  const voiceId = cleanText(req.body?.voiceId, 100) || undefined;
+  if (!text) return res.status(400).json({ error: 'There is no response for Dee to speak.' });
+  try {
+    const audio = await synthesizeDeeSpeech(text, voiceId);
+    res.setHeader('Cache-Control', 'no-store');
+    res.type('audio/mpeg').send(audio);
+  } catch (error: any) {
+    console.error('Dee speech failed', { message: error?.message });
+    res.status(502).json({ error: error?.message || 'Dee could not create a spoken response.' });
+  }
 });
 
 const videoBucket = 'devotional-media';
@@ -366,7 +428,7 @@ app.get('/api/health', (_req, res) => res.json({
   status: 'ok',
   auth: 'supabase-google',
   adminConfigured: config.adminEmails.size > 0,
-  integrations: { openaiConfigured: Boolean(config.openaiApiKey) }
+  integrations: { openaiConfigured: Boolean(config.openaiApiKey), elevenLabsConfigured: Boolean(config.elevenLabsApiKey) }
 }));
 app.get(['/', '/index.html'], requireUser, (_req, res) => res.sendFile(path.join(root, 'index.html')));
 app.get('/workflow.html', requireUser, (_req, res) => res.sendFile(path.join(root, 'workflow.html')));
