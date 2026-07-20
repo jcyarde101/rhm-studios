@@ -5,12 +5,11 @@ function showStep(number){steps.forEach(s=>s.classList.toggle('active',s.dataset
 steps.forEach(step=>step.addEventListener('click',()=>showStep(step.dataset.step)));
 document.querySelectorAll('.chip').forEach(chip=>chip.addEventListener('click',()=>{document.querySelectorAll('.chip').forEach(c=>c.classList.remove('selected'));chip.classList.add('selected')}));
 document.querySelectorAll('.style-options').forEach(group=>group.querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{group.querySelectorAll('button').forEach(b=>b.classList.remove('selected'));button.classList.add('selected')})));
-document.querySelectorAll('.platforms button').forEach(button=>button.addEventListener('click',()=>button.classList.toggle('selected')));
 document.querySelectorAll('.transcript p').forEach(p=>p.addEventListener('click',()=>{document.querySelectorAll('.transcript p').forEach(x=>x.classList.remove('selected'));p.classList.add('selected');document.querySelector('.timeline>span').textContent=p.dataset.time}));
 document.getElementById('polishRange')?.addEventListener('input',e=>document.getElementById('polishValue').textContent=e.target.value+'%');
 const toast=document.getElementById('toast');
 function notify(title='Stage approved',message='Your choices are saved. Preparing the next review.'){toast.querySelector('strong').textContent=title;toast.querySelector('small').textContent=message;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),3000)}
-document.querySelectorAll('[data-approve]').forEach(button=>button.addEventListener('click',()=>{const n=Number(button.dataset.approve);approvals.add(n);const step=steps.find(s=>Number(s.dataset.step)===n);step.classList.add('complete');step.querySelector('b').textContent='APPROVED';notify();showStep(Math.min(n+1,5))}));
+document.querySelectorAll('[data-approve]').forEach(button=>button.addEventListener('click',()=>{const n=Number(button.dataset.approve);approvals.add(n);const step=steps.find(s=>Number(s.dataset.step)===n);step.classList.add('complete');step.querySelector('b').textContent='APPROVED';notify();showStep(Math.min(n+1,4))}));
 document.querySelectorAll('.approve-mini').forEach(button=>button.addEventListener('click',()=>{button.textContent=button.classList.toggle('chosen')?'✓ Approved':'✓';notify('Edit choice saved','This decision will be used in the full render.')}));
 document.querySelectorAll('.preview-button').forEach(button=>button.addEventListener('click',()=>notify('Preview prepared','This prototype will play the rendered segment when the processing backend is connected.')));
 const writingApproved=new Set();let currentWriting='description';let currentShortDescription=null;let shortDescriptionLoading=false;
@@ -78,13 +77,9 @@ document.getElementById('requestWritingChanges')?.addEventListener('click',()=>{
 document.getElementById('regenerateDescription')?.addEventListener('click',async event=>{const guidance=document.getElementById('writingGuidance').value.trim();if(!guidance)return notify('Tell AI what to change','Speak or type the correction before regenerating.');event.currentTarget.disabled=true;const succeeded=await ensureShortDescription(guidance);event.currentTarget.disabled=false;if(succeeded)document.getElementById('writingChangePanel').hidden=true});
 document.getElementById('retryDescription')?.addEventListener('click',()=>ensureShortDescription());
 document.getElementById('approveWriting')?.addEventListener('click',async event=>{if(currentWriting!=='description'||!currentShortDescription)return;const button=event.currentTarget;button.disabled=true;button.textContent='Saving approval...';try{const result=await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/writing/short-description/approve`,{method:'POST'});renderShortDescription(result.draft);notify('Description approved','Your transcript-based video description is saved and ready to use.')}catch(error){button.disabled=false;button.textContent='✓ Approve description';notify('Approval needs attention',error.message)}});
-const clips=[['Waiting is not wasted time','03:10–03:42','Strong hook · 32 sec'],['Hope renews your strength','08:38–09:16','Scripture · 38 sec'],['God has not forgotten you','14:02–14:35','Encouragement · 33 sec'],['Trust without every answer','10:20–10:48','Teaching · 28 sec'],['A prayer for the waiting','20:31–21:14','Prayer · 43 sec'],['The next faithful step','18:05–18:31','Practical · 26 sec']];
-const clipList=document.getElementById('clipList');
-clips.forEach((clip,i)=>{const item=document.createElement('label');item.className='clip-item'+(i===0?' active':'');item.innerHTML=`<input type="checkbox" ${i<3?'checked':''}><img src="assets/morning-devotional.png" alt=""><div><strong>${clip[0]}</strong><small>${clip[1]}</small><b>${clip[2]}</b></div>`;item.addEventListener('click',()=>{document.querySelectorAll('.clip-item').forEach(x=>x.classList.remove('active'));item.classList.add('active')});item.querySelector('input').addEventListener('change',()=>document.getElementById('selectedClips').textContent=document.querySelectorAll('.clip-item input:checked').length);clipList?.appendChild(item)});
 document.getElementById('previewAll')?.addEventListener('click',()=>notify('Preview not available','A real edited-video render has not been submitted yet.'));
-document.getElementById('finalizeButton')?.addEventListener('click',()=>showStep(5));
+document.getElementById('finalizeButton')?.addEventListener('click',()=>showStep(4));
 document.getElementById('reviewFinalDescription')?.addEventListener('click',()=>showStep(3));
-document.getElementById('reviewClipSelections')?.addEventListener('click',()=>showStep(4));
 document.getElementById('createImageDrafts')?.addEventListener('click',()=>{const prompt=document.getElementById('imagePrompt').value.trim();if(!prompt){notify('Add your direction','Describe the image you want before generating drafts.');return}notify('Image direction saved','GPT Image 2 generation will run here when the backend is connected.')});
 document.getElementById('approveIntro')?.addEventListener('click',e=>{e.currentTarget.textContent='✓ Intro approved';notify('Intro approved','This intro will be included in the full edit unless you disable it.')});
 document.getElementById('replaceIntro')?.addEventListener('click',()=>notify('Brand media library','Additional intros will appear here as you add them.'));
@@ -444,9 +439,7 @@ function productionJobState(job, label) {
 function renderProductionStatus(data) {
   const jobs = data.jobs || [];
   const videoJob = findProductionJob(jobs, ['full_render', 'video_render', 'runway_render', 'render']);
-  const clipJob = findProductionJob(jobs, ['clip_render', 'social_clip_render']);
   const video = productionJobState(videoJob, 'The edited full video');
-  const clips = productionJobState(clipJob, 'The social clips');
   const sidebar = document.getElementById('productionStatusCard');
   sidebar.dataset.state = video.state;
   document.getElementById('productionStatusLabel').textContent = video.title;
@@ -471,14 +464,10 @@ function renderProductionStatus(data) {
   const descriptionStatus = document.getElementById('finalDescriptionStatus');
   descriptionStatus.textContent = descriptionApproved ? 'APPROVED' : 'AWAITING APPROVAL';
   descriptionStatus.className = descriptionApproved ? '' : 'working';
-  const clipStatus = document.getElementById('finalClipsStatus');
-  clipStatus.textContent = clipJob ? clips.badge : 'TEXT PLAN ONLY';
-  clipStatus.className = clips.state === 'ready' ? '' : 'working';
-  document.getElementById('finalClipsCopy').textContent = clipJob ? clips.copy : 'The written selections may be approved now; actual clip videos have not been rendered.';
-  document.getElementById('finalApprovalTitle').textContent = video.state === 'ready' && clips.state === 'ready' ? 'Rendered files need final preview verification.' : 'Waiting for the actual rendered videos.';
-  document.getElementById('finalApprovalCopy').textContent = 'This button remains locked until the full video and social clips have real reviewable files.';
+  document.getElementById('finalApprovalTitle').textContent = video.state === 'ready' ? 'The rendered master video needs final preview verification.' : 'Waiting for the actual full-video render.';
+  document.getElementById('finalApprovalCopy').textContent = 'This button remains locked until the polished main video has a real reviewable file.';
   document.getElementById('approveFinalPackage').disabled = true;
-  return { videoJob, clipJob };
+  return { videoJob };
 }
 
 function renderWorkspace(data) {
@@ -507,7 +496,7 @@ function renderWorkspace(data) {
   if (data.messageReview) renderMessageReview(data.messageReview, data.userDirection);
   else renderProcessingState(job);
   const visualActive = !data.visualAnalysis && visualJob && ['queued', 'running'].includes(visualJob.status);
-  const productionActive = [production.videoJob, production.clipJob].some(item => item && ['queued', 'running'].includes(item.status));
+  const productionActive = Boolean(production.videoJob && ['queued', 'running'].includes(production.videoJob.status));
   const shouldPoll = (!data.messageReview && (!job || job.status === 'queued' || job.status === 'running')) || visualActive || productionActive;
   if (shouldPoll && !workspacePoll) workspacePoll = window.setInterval(loadRealWorkspace, 8000);
   if (!shouldPoll && workspacePoll) {
