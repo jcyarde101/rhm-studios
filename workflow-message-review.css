@@ -6,6 +6,7 @@
 .message-review-head p { max-width: 760px; margin: 0; color: #b9c6db; font-size: 9px; line-height: 1.6; }
 .message-review-status { align-self: flex-start; border: 1px solid #6a80a2; background: #102f62; border-radius: 30px; padding: 7px 11px; color: #e8c96e; font-size: 7px; font-weight: 800; letter-spacing: .1em; white-space: nowrap; }
 .message-review-loading, .message-review-error { display: flex; align-items: center; gap: 14px; padding: 24px 26px; }
+.message-review-loading[hidden], .message-review-error[hidden], .message-review-content[hidden] { display: none !important; }
 .message-review-loading div { flex: 1; }
 .message-review-loading strong, .message-review-error strong { font: 600 16px "Newsreader"; }
 .message-review-loading p, .message-review-error p { margin: 4px 0 0; color: #adbad0; font-size: 9px; }
