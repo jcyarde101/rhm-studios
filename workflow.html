@@ -24,7 +24,7 @@
       <nav id="stepNav">
         <button class="step active" data-step="1"><i>1</i><span><strong>Message & transcript</strong><small>Review the foundation</small></span><b>REVIEW</b></button>
         <button class="step" data-step="2"><i>2</i><span><strong>Video direction</strong><small>Choose the visual treatment</small></span><b>WAITING</b></button>
-        <button class="step" data-step="3"><i>3</i><span><strong>Writing</strong><small>Description, devotional & prayer</small></span><b>WAITING</b></button>
+        <button class="step" data-step="3"><i>3</i><span><strong>Video description</strong><small>Review the posting copy</small></span><b>WAITING</b></button>
         <button class="step" data-step="4"><i>4</i><span><strong>Social clips</strong><small>Select and shape moments</small></span><b>WAITING</b></button>
         <button class="step" data-step="5"><i>5</i><span><strong>Final review</strong><small>Approve the complete package</small></span><b>WAITING</b></button>
       </nav>
@@ -109,7 +109,7 @@
 
       <section class="stage" data-panel="3">
         <div class="stage-heading"><div><span class="kicker">STEP 3 OF 5</span><h1>Review the written message</h1><p>RHM Studios turns the transcript into your ready-to-post description. You review and approve it.</p></div><span class="ready-badge" id="writingDraftBadge">AI DRAFT</span></div>
-        <div class="writing-tabs"><button class="active" data-writing="description">Short description <b>REVIEW</b></button><button data-writing="devotional">Full devotional <b>REVIEW</b></button><button data-writing="prayer">Prayer <b>REVIEW</b></button><button data-writing="scriptures">Scriptures <b>3 FOUND</b></button></div>
+        <div class="writing-tabs"><button class="active" data-writing="description">Short video description <b>REVIEW</b></button></div>
         <div class="writing-editor">
           <div class="editor-main">
             <div class="short-description-view" id="shortDescriptionView">
@@ -117,7 +117,6 @@
               <article class="description-draft" id="descriptionDraft" hidden><span>VIDEO DESCRIPTION</span><h2 id="descriptionTitle"></h2><div class="description-scripture"><small>FOUNDATIONAL SCRIPTURE</small><strong id="descriptionScripture"></strong></div><div id="descriptionParagraphs"></div><small id="descriptionSourceNote">Created from this video's transcript.</small></article>
               <div class="description-error" id="descriptionError" hidden><strong>The description needs attention</strong><p id="descriptionErrorCopy"></p><button class="outline-button" id="retryDescription" type="button">Try again</button></div>
             </div>
-            <div id="legacyWritingView" hidden><div class="editor-toolbar"><button>↶</button><button>↷</button><i></i><button><b>B</b></button><button><em>I</em></button><button>☷</button><span>Draft</span></div><div class="editable" id="writingContent" contenteditable="true"></div></div>
           </div>
           <aside><span>AI DRAFT NOTES</span><h3 id="writingNotesTitle">Built from your transcript</h3><ul id="writingDraftNotes"><li>Faithful to the message you actually recorded</li><li>One or two short, polished paragraphs</li><li>Ready for StreamYard, YouTube, or Facebook</li></ul><button class="outline-button full" id="requestWritingChanges" type="button">Request changes</button><div class="writing-change-panel" id="writingChangePanel" hidden><label for="writingGuidance">Tell AI what to change</label><textarea id="writingGuidance" rows="4" placeholder="For example: Make it warmer, shorten the second paragraph, or emphasize the main point more clearly."></textarea><button id="regenerateDescription" type="button">Regenerate from transcript</button></div><div class="writing-approval"><span id="writingApprovalStatus">Not yet approved</span><button id="approveWriting">✓ Approve description</button></div></aside>
         </div>
@@ -131,10 +130,10 @@
       </section>
 
       <section class="stage" data-panel="5">
-        <div class="stage-heading"><div><span class="kicker">STEP 5 OF 5</span><h1>Your complete devotional package</h1><p>Everything remains private until you approve the final package.</p></div><span class="ready-badge rendering">FULL RENDER · 68%</span></div>
-        <div class="package-grid"><article><span>01</span><div><strong>Polished full video</strong><small>24:18 · 1080p · B-roll, scripture graphics, mixed audio</small></div><b class="working">RENDERING</b><button>Preview</button></article><article><span>02</span><div><strong>Written devotional package</strong><small>Description, devotional, prayer, and scripture references</small></div><b>APPROVED</b><button>Review</button></article><article><span>03</span><div><strong>3 vertical social clips</strong><small>9:16 · captions · platform-ready exports</small></div><b>APPROVED</b><button>Review</button></article><article><span>04</span><div><strong>Ebook library entry</strong><small>Categorized under Faith, Waiting, and Encouragement</small></div><b>DRAFT</b><button>Review</button></article></div>
+        <div class="stage-heading"><div><span class="kicker">STEP 5 OF 5</span><h1>Your complete video package</h1><p>This review contains only the video deliverables. Podcast audio and RHM Publications will have their own separate workflows.</p></div><span class="ready-badge rendering">FULL RENDER · 68%</span></div>
+        <div class="package-grid"><article><span>01</span><div><strong>Polished full video</strong><small>1080p · approved visual treatment, Scripture graphics, brand media, and mixed audio</small></div><b class="working">RENDERING</b><button>Preview</button></article><article><span>02</span><div><strong>Approved video description</strong><small>Title, foundational Scripture, and up to two transcript-based paragraphs</small></div><b>APPROVED</b><button>Review</button></article><article><span>03</span><div><strong>Vertical social clips</strong><small>9:16 · captions · approved selections and platform-ready exports</small></div><b>APPROVED</b><button>Review</button></article></div>
         <div class="publish-note"><span>🔒</span><div><strong>Approval does not automatically publish</strong><p>After approval, you’ll choose where and when each item is published.</p></div></div>
-        <div class="approval-bar final"><div><span>FINAL APPROVAL</span><p><strong>Approve only after the full-quality render is ready.</strong><small>The button will unlock when processing completes.</small></p></div><button class="approve-button" disabled>Approve final package</button></div>
+        <div class="approval-bar final"><div><span>FINAL VIDEO APPROVAL</span><p><strong>Approve only after the full-quality video render is ready.</strong><small>The button will unlock when video processing completes.</small></p></div><button class="approve-button" disabled>Approve video package</button></div>
       </section>
     </main>
   </div>
@@ -154,5 +153,5 @@
     <audio id="deeAudio" hidden></audio>
   </aside>
   <div class="reading-modal" id="transcriptModal" hidden><button class="reading-modal-backdrop" type="button" aria-label="Close transcript"></button><section role="dialog" aria-modal="true" aria-labelledby="transcriptModalTitle"><header><div><span>FULL TRANSCRIPT</span><h2 id="transcriptModalTitle">Devotional transcript</h2></div><button id="closeTranscriptModal" type="button" aria-label="Close transcript">×</button></header><div class="reading-modal-body" id="transcriptModalBody"></div></section></div>
-  <script src="vendor/tus.min.js"></script><script src="workflow.js?v=20260720-written-description"></script><script src="voice-input.js?v=20260720-written-description"></script><script src="dee-agent.js?v=20260720-visual-analysis"></script><script src="session.js?v=20260720-planning"></script>
+  <script src="vendor/tus.min.js"></script><script src="workflow.js?v=20260720-video-package"></script><script src="voice-input.js?v=20260720-written-description"></script><script src="dee-agent.js?v=20260720-visual-analysis"></script><script src="session.js?v=20260720-planning"></script>
 </body></html>

@@ -13,7 +13,6 @@ function notify(title='Stage approved',message='Your choices are saved. Preparin
 document.querySelectorAll('[data-approve]').forEach(button=>button.addEventListener('click',()=>{const n=Number(button.dataset.approve);approvals.add(n);const step=steps.find(s=>Number(s.dataset.step)===n);step.classList.add('complete');step.querySelector('b').textContent='APPROVED';notify();showStep(Math.min(n+1,5))}));
 document.querySelectorAll('.approve-mini').forEach(button=>button.addEventListener('click',()=>{button.textContent=button.classList.toggle('chosen')?'✓ Approved':'✓';notify('Edit choice saved','This decision will be used in the full render.')}));
 document.querySelectorAll('.preview-button').forEach(button=>button.addEventListener('click',()=>notify('Preview prepared','This prototype will play the rendered segment when the processing backend is connected.')));
-const writingDrafts={devotional:'<h2>Full devotional</h2><p>This transcript-based draft will be connected after the short video description is approved.</p>',prayer:'<h2>Prayer</h2><p>This transcript-based prayer draft will be connected in the next written-content step.</p>',scriptures:'<h2>Scriptures in This Message</h2><p>The detected Scripture list will appear here for your review.</p>'};
 const writingApproved=new Set();let currentWriting='description';let currentShortDescription=null;let shortDescriptionLoading=false;
 
 function setDescriptionLoading(message='Preparing the title, foundational Scripture, and short description.') {
@@ -66,15 +65,12 @@ async function ensureShortDescription(guidance='') {
 function switchWritingTab(kind) {
   currentWriting=kind;
   document.querySelectorAll('[data-writing]').forEach(tab=>tab.classList.toggle('active',tab.dataset.writing===kind));
-  const descriptionMode=kind==='description';
-  document.getElementById('shortDescriptionView').hidden=!descriptionMode;
-  document.getElementById('legacyWritingView').hidden=descriptionMode;
-  document.getElementById('requestWritingChanges').hidden=!descriptionMode;
+  document.getElementById('shortDescriptionView').hidden=false;
+  document.getElementById('requestWritingChanges').hidden=false;
   document.getElementById('writingChangePanel').hidden=true;
-  document.querySelector('.writing-approval').hidden=!descriptionMode;
-  if(descriptionMode){document.getElementById('writingNotesTitle').textContent='Built from your transcript';void ensureShortDescription();return}
-  document.getElementById('writingContent').innerHTML=writingDrafts[kind]||'';
-  document.getElementById('writingNotesTitle').textContent='Coming after the short description';
+  document.querySelector('.writing-approval').hidden=false;
+  document.getElementById('writingNotesTitle').textContent='Built from your transcript';
+  void ensureShortDescription();
 }
 
 document.querySelectorAll('[data-writing]').forEach(tab=>tab.addEventListener('click',()=>switchWritingTab(tab.dataset.writing)));
