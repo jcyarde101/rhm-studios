@@ -18,7 +18,7 @@ app.use(express.json({ limit: '1mb' }));
 const publicFiles = [
   'styles.css', 'app.js', 'workflow.css', 'workflow-image.css', 'workflow-message-review.css', 'dee-agent.css', 'workflow.js', 'dee-agent.js',
   'library.css', 'library.js', 'rhm-brand.css', 'brand-media.css', 'session.js', 'voice-input.css', 'voice-input.js', 'workflow-accessibility.css', 'planning-workspace.css',
-  'auth.css', 'auth.js', 'written-description.css'
+  'auth.css', 'auth.js', 'written-description.css', 'render-status.css'
 ];
 for (const file of publicFiles) app.get(`/${file}`, (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache');

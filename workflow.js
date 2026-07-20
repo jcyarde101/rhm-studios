@@ -81,8 +81,10 @@ document.getElementById('approveWriting')?.addEventListener('click',async event=
 const clips=[['Waiting is not wasted time','03:10–03:42','Strong hook · 32 sec'],['Hope renews your strength','08:38–09:16','Scripture · 38 sec'],['God has not forgotten you','14:02–14:35','Encouragement · 33 sec'],['Trust without every answer','10:20–10:48','Teaching · 28 sec'],['A prayer for the waiting','20:31–21:14','Prayer · 43 sec'],['The next faithful step','18:05–18:31','Practical · 26 sec']];
 const clipList=document.getElementById('clipList');
 clips.forEach((clip,i)=>{const item=document.createElement('label');item.className='clip-item'+(i===0?' active':'');item.innerHTML=`<input type="checkbox" ${i<3?'checked':''}><img src="assets/morning-devotional.png" alt=""><div><strong>${clip[0]}</strong><small>${clip[1]}</small><b>${clip[2]}</b></div>`;item.addEventListener('click',()=>{document.querySelectorAll('.clip-item').forEach(x=>x.classList.remove('active'));item.classList.add('active')});item.querySelector('input').addEventListener('change',()=>document.getElementById('selectedClips').textContent=document.querySelectorAll('.clip-item input:checked').length);clipList?.appendChild(item)});
-document.getElementById('previewAll')?.addEventListener('click',()=>notify('Full preview queued','The lightweight preview will open when the backend renderer is connected.'));
+document.getElementById('previewAll')?.addEventListener('click',()=>notify('Preview not available','A real edited-video render has not been submitted yet.'));
 document.getElementById('finalizeButton')?.addEventListener('click',()=>showStep(5));
+document.getElementById('reviewFinalDescription')?.addEventListener('click',()=>showStep(3));
+document.getElementById('reviewClipSelections')?.addEventListener('click',()=>showStep(4));
 document.getElementById('createImageDrafts')?.addEventListener('click',()=>{const prompt=document.getElementById('imagePrompt').value.trim();if(!prompt){notify('Add your direction','Describe the image you want before generating drafts.');return}notify('Image direction saved','GPT Image 2 generation will run here when the backend is connected.')});
 document.getElementById('approveIntro')?.addEventListener('click',e=>{e.currentTarget.textContent='✓ Intro approved';notify('Intro approved','This intro will be included in the full edit unless you disable it.')});
 document.getElementById('replaceIntro')?.addEventListener('click',()=>notify('Brand media library','Additional intros will appear here as you add them.'));
@@ -426,6 +428,59 @@ function renderRunwayDirectionSynopsis(direction) {
   document.getElementById('approveSavedRunwaySynopsis').hidden = false;
 }
 
+function findProductionJob(jobs, types) {
+  return (jobs || []).find(job => types.includes(job.job_type));
+}
+
+function productionJobState(job, label) {
+  const progress = Math.max(0, Math.min(100, Number(job?.progress) || 0));
+  if (!job) return { state: 'waiting', progress: 0, badge: 'NOT STARTED', title: `${label} has not started`, copy: 'No render job has been submitted.' };
+  if (job.status === 'completed') return { state: 'ready', progress: 100, badge: 'READY', title: `${label} is complete`, copy: 'The render job reports completion and is ready for file verification.' };
+  if (job.status === 'failed') return { state: 'failed', progress, badge: 'NEEDS ATTENTION', title: `${label} stopped`, copy: job.error_message || 'The render job did not finish.' };
+  if (job.status === 'queued') return { state: 'queued', progress, badge: 'QUEUED', title: `${label} is queued`, copy: 'The render has been submitted and is waiting for processing capacity.' };
+  return { state: 'running', progress, badge: `RENDERING ${progress}%`, title: `${label} is rendering`, copy: 'This page checks the real job status automatically. You may leave and return later.' };
+}
+
+function renderProductionStatus(data) {
+  const jobs = data.jobs || [];
+  const videoJob = findProductionJob(jobs, ['full_render', 'video_render', 'runway_render', 'render']);
+  const clipJob = findProductionJob(jobs, ['clip_render', 'social_clip_render']);
+  const video = productionJobState(videoJob, 'The edited full video');
+  const clips = productionJobState(clipJob, 'The social clips');
+  const sidebar = document.getElementById('productionStatusCard');
+  sidebar.dataset.state = video.state;
+  document.getElementById('productionStatusLabel').textContent = video.title;
+  document.getElementById('productionStatusPercent').textContent = `${video.progress}%`;
+  document.getElementById('productionStatusBar').style.width = `${video.progress}%`;
+  document.getElementById('productionStatusCopy').textContent = videoJob ? video.copy : 'Your upload, transcript, analysis, and approved plans are safe. No edited video render has been submitted yet.';
+  const panel = document.getElementById('finalRenderProgress');
+  panel.dataset.state = video.state;
+  document.getElementById('finalRenderPercent').textContent = `${video.progress}%`;
+  document.getElementById('finalRenderBar').style.width = `${video.progress}%`;
+  document.getElementById('finalRenderTitle').textContent = video.title;
+  document.getElementById('finalRenderCopy').textContent = videoJob ? video.copy : 'Your upload, transcript, visual analysis, description, and approved direction are safe. A real Runway/render job still needs to be submitted.';
+  document.getElementById('finalRenderBadge').textContent = video.badge;
+  const videoStatus = document.getElementById('finalVideoStatus');
+  videoStatus.textContent = video.badge;
+  videoStatus.className = video.state === 'ready' ? '' : 'working';
+  document.getElementById('finalVideoCopy').textContent = videoJob ? video.copy : 'The edit direction is approved, but the full-quality edited video has not been rendered.';
+  const videoPreview = document.getElementById('finalVideoPreview');
+  videoPreview.disabled = true;
+  videoPreview.textContent = video.state === 'ready' ? 'File verification needed' : 'Preview unavailable';
+  const descriptionApproved = Boolean(data.shortDescription?.approved);
+  const descriptionStatus = document.getElementById('finalDescriptionStatus');
+  descriptionStatus.textContent = descriptionApproved ? 'APPROVED' : 'AWAITING APPROVAL';
+  descriptionStatus.className = descriptionApproved ? '' : 'working';
+  const clipStatus = document.getElementById('finalClipsStatus');
+  clipStatus.textContent = clipJob ? clips.badge : 'TEXT PLAN ONLY';
+  clipStatus.className = clips.state === 'ready' ? '' : 'working';
+  document.getElementById('finalClipsCopy').textContent = clipJob ? clips.copy : 'The written selections may be approved now; actual clip videos have not been rendered.';
+  document.getElementById('finalApprovalTitle').textContent = video.state === 'ready' && clips.state === 'ready' ? 'Rendered files need final preview verification.' : 'Waiting for the actual rendered videos.';
+  document.getElementById('finalApprovalCopy').textContent = 'This button remains locked until the full video and social clips have real reviewable files.';
+  document.getElementById('approveFinalPackage').disabled = true;
+  return { videoJob, clipJob };
+}
+
 function renderWorkspace(data) {
   document.title = `${data.project.title} · RHM Studios`;
   const headerTitle = document.querySelector('.project-name strong');
@@ -447,11 +502,13 @@ function renderWorkspace(data) {
   if (data.shortDescription) renderShortDescription(data.shortDescription);
   renderRunwayDirectionPlan(data.videoDirection);
   if (!data.videoDirection) renderRunwayDirectionSynopsis(data.videoDirectionSynopsis);
+  const production = renderProductionStatus(data);
   const job = (data.jobs || []).find(item => item.job_type === 'transcription');
   if (data.messageReview) renderMessageReview(data.messageReview, data.userDirection);
   else renderProcessingState(job);
   const visualActive = !data.visualAnalysis && visualJob && ['queued', 'running'].includes(visualJob.status);
-  const shouldPoll = (!data.messageReview && (!job || job.status === 'queued' || job.status === 'running')) || visualActive;
+  const productionActive = [production.videoJob, production.clipJob].some(item => item && ['queued', 'running'].includes(item.status));
+  const shouldPoll = (!data.messageReview && (!job || job.status === 'queued' || job.status === 'running')) || visualActive || productionActive;
   if (shouldPoll && !workspacePoll) workspacePoll = window.setInterval(loadRealWorkspace, 8000);
   if (!shouldPoll && workspacePoll) {
     window.clearInterval(workspacePoll);
