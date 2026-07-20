@@ -486,6 +486,26 @@ app.post('/api/projects/:projectId/writing/short-description/approve', requireUs
   res.json({ draft: { ...draft, approved: true, updatedAt: data.updated_at } });
 });
 
+app.post('/api/projects/:projectId/message-review/approve', requireUser, async (req, res) => {
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const { data: stage } = await adminClient.from('workflow_stages')
+    .select('id,status,notes').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('stage', 'message').maybeSingle();
+  if (!stage?.notes) return res.status(409).json({ error: 'The transcript and AI message review must be ready before approval.' });
+  let snapshot: Record<string, unknown> = {};
+  try { snapshot = JSON.parse(stage.notes); } catch { return res.status(409).json({ error: 'The saved message review could not be read.' }); }
+  if (!snapshot.review) return res.status(409).json({ error: 'The AI message review is incomplete.' });
+  const approvedAt = new Date().toISOString();
+  const { data: approved, error } = await adminClient.from('workflow_stages').update({ status: 'approved', approved_at: approvedAt, approved_by: ownerId })
+    .eq('id', stage.id).eq('owner_id', ownerId).select('id,status,approved_at,updated_at').single();
+  if (error || !approved) return res.status(500).json({ error: 'The message approval could not be saved.' });
+  await adminClient.from('approval_events').insert({
+    devotional_id: projectId, owner_id: ownerId, entity_type: 'workflow_stage', entity_id: stage.id,
+    action: 'approved', comment: 'Creator approved the transcript message review and direction.', snapshot
+  });
+  res.json({ stage: approved });
+});
+
 app.post('/api/projects/:projectId/message-review', requireUser, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const ownerId = res.locals.user.id;

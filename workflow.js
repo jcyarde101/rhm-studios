@@ -1,6 +1,5 @@
 const steps=[...document.querySelectorAll('.step')];
 const panels=[...document.querySelectorAll('.stage')];
-const approvals=new Set();
 function showStep(number){steps.forEach(s=>s.classList.toggle('active',s.dataset.step===String(number)));panels.forEach(p=>p.classList.toggle('active',p.dataset.panel===String(number)));if(Number(number)===3)void ensureShortDescription();window.scrollTo({top:0,behavior:'smooth'})}
 steps.forEach(step=>step.addEventListener('click',()=>showStep(step.dataset.step)));
 document.querySelectorAll('.chip').forEach(chip=>chip.addEventListener('click',()=>{document.querySelectorAll('.chip').forEach(c=>c.classList.remove('selected'));chip.classList.add('selected')}));
@@ -9,7 +8,6 @@ document.querySelectorAll('.transcript p').forEach(p=>p.addEventListener('click'
 document.getElementById('polishRange')?.addEventListener('input',e=>document.getElementById('polishValue').textContent=e.target.value+'%');
 const toast=document.getElementById('toast');
 function notify(title='Stage approved',message='Your choices are saved. Preparing the next review.'){toast.querySelector('strong').textContent=title;toast.querySelector('small').textContent=message;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),3000)}
-document.querySelectorAll('[data-approve]').forEach(button=>button.addEventListener('click',()=>{const n=Number(button.dataset.approve);approvals.add(n);const step=steps.find(s=>Number(s.dataset.step)===n);step.classList.add('complete');step.querySelector('b').textContent='APPROVED';notify();showStep(Math.min(n+1,4))}));
 document.querySelectorAll('.approve-mini').forEach(button=>button.addEventListener('click',()=>{button.textContent=button.classList.toggle('chosen')?'✓ Approved':'✓';notify('Edit choice saved','This decision will be used in the full render.')}));
 document.querySelectorAll('.preview-button').forEach(button=>button.addEventListener('click',()=>notify('Preview prepared','This prototype will play the rendered segment when the processing backend is connected.')));
 const writingApproved=new Set();let currentWriting='description';let currentShortDescription=null;let shortDescriptionLoading=false;
@@ -39,7 +37,7 @@ function renderShortDescription(draft) {
   document.getElementById('approveWriting').textContent=approved?'✓ Description approved':'✓ Approve description';
   document.getElementById('approveWriting').disabled=approved;
   document.getElementById('writingCount').textContent=`${approved?1:0} of 1`;
-  document.querySelector('[data-approve="3"]').disabled=!approved;
+  document.getElementById('continueFromDescription').disabled=!approved;
   document.getElementById('writingDraftBadge').textContent=approved?'DESCRIPTION APPROVED':'READY FOR REVIEW';
 }
 
@@ -411,7 +409,8 @@ function renderRunwayDirectionPlan(plan) {
   const badge = document.querySelector('[data-panel="2"] .ready-badge');
   if (badge) badge.textContent = 'RUNWAY BRIEF APPROVED';
   const step = document.querySelector('.step[data-step="2"]');
-  if (step) step.querySelector('b').textContent = 'READY';
+  if (step) { step.classList.add('complete'); step.querySelector('b').textContent = 'APPROVED'; }
+  document.getElementById('continueFromDirection').disabled = false;
 }
 window.renderRunwayDirectionPlan = renderRunwayDirectionPlan;
 
@@ -470,6 +469,57 @@ function renderProductionStatus(data) {
   return { videoJob };
 }
 
+function setWorkflowStepState(number, approved) {
+  const step = document.querySelector(`.step[data-step="${number}"]`);
+  if (!step) return;
+  step.classList.toggle('complete', approved);
+  const label = step.querySelector('b');
+  if (label) label.textContent = approved ? 'APPROVED' : 'REVIEW';
+}
+
+function renderProductionHandoff(data) {
+  const messageApproved = data.messageStage?.status === 'approved';
+  const directionApproved = data.videoDirectionStage?.status === 'approved' && Boolean(data.videoDirection);
+  const descriptionApproved = Boolean(data.shortDescription?.approved);
+  const ready = messageApproved && directionApproved && descriptionApproved;
+  const review = data.messageReview || {};
+  const direction = data.videoDirection || {};
+  const description = data.shortDescription || {};
+
+  setWorkflowStepState(1, messageApproved);
+  setWorkflowStepState(2, directionApproved);
+  setWorkflowStepState(3, descriptionApproved);
+  document.getElementById('approveMessageReview').disabled = messageApproved || !data.messageReview;
+  document.getElementById('approveMessageReview').textContent = messageApproved ? '✓ Message approved' : 'Approve & continue →';
+  document.getElementById('continueFromDirection').disabled = !directionApproved;
+  document.getElementById('continueFromDescription').disabled = !descriptionApproved;
+
+  const handoff = document.getElementById('productionHandoff');
+  handoff.dataset.ready = String(ready);
+  document.getElementById('handoffReadiness').textContent = ready ? 'ALL 3 APPROVED' : 'APPROVAL NEEDED';
+  const fill = (name, approved, title, copy, detail) => {
+    const article = document.getElementById(`handoff${name}`);
+    article.dataset.approved = String(approved);
+    document.getElementById(`handoff${name}Status`).textContent = approved ? 'APPROVED' : 'NEEDS APPROVAL';
+    document.getElementById(`handoff${name}Title`).textContent = title || 'Not ready yet';
+    document.getElementById(`handoff${name}Copy`).textContent = copy || 'Return to this step to finish the review.';
+    document.getElementById(name === 'Message' ? 'handoffScripture' : `handoff${name}Details`).textContent = detail || '';
+  };
+  fill('Message', messageApproved, review.centralMessage || 'Message review', review.overallSynopsis, data.project.primary_scripture ? `Foundational Scripture: ${data.project.primary_scripture}` : 'No foundational Scripture saved.');
+  fill('Direction', directionApproved, direction.title || data.videoDirectionSynopsis?.title || 'Video direction', direction.approvalSynopsis || data.videoDirectionSynopsis?.synopsis, direction.scenes?.length ? `${direction.scenes.length} focused Runway/B-roll ranges · audio, Scripture graphics, and RHM branding included` : 'Approve Dee\'s synopsis to save the detailed production direction.');
+  fill('Description', descriptionApproved, description.title || 'Video description', (description.paragraphs || []).join(' '), description.foundationalScripture ? `Foundational Scripture: ${description.foundationalScripture}` : 'Transcript-based posting copy.');
+
+  const renderJob = findProductionJob(data.jobs || [], ['full_render', 'video_render', 'runway_render', 'render']);
+  const canStart = false;
+  const startButton = document.getElementById('startFullRender');
+  startButton.disabled = !canStart;
+  document.getElementById('renderStartTitle').textContent = renderJob ? 'The full video render has already been submitted.' : ready ? 'Your production handoff is approved and ready for the render connection.' : 'Finish the approvals marked above.';
+  document.getElementById('renderStartCopy').textContent = renderJob ? 'Use the live status above to follow the job.' : ready ? 'The button will activate when the real Runway/FFmpeg worker is connected; it will not create a job that stays at 0%.' : 'Nothing will be submitted or charged until all three approvals are saved.';
+  document.getElementById('renderStartBar').hidden = Boolean(renderJob);
+  document.getElementById('finalApprovalBar').hidden = !renderJob;
+  return ready;
+}
+
 function renderWorkspace(data) {
   document.title = `${data.project.title} · RHM Studios`;
   const headerTitle = document.querySelector('.project-name strong');
@@ -491,6 +541,7 @@ function renderWorkspace(data) {
   if (data.shortDescription) renderShortDescription(data.shortDescription);
   renderRunwayDirectionPlan(data.videoDirection);
   if (!data.videoDirection) renderRunwayDirectionSynopsis(data.videoDirectionSynopsis);
+  renderProductionHandoff(data);
   const production = renderProductionStatus(data);
   const job = (data.jobs || []).find(item => item.job_type === 'transcription');
   if (data.messageReview) renderMessageReview(data.messageReview, data.userDirection);
@@ -629,6 +680,25 @@ document.getElementById('approveSavedRunwaySynopsis')?.addEventListener('click',
   }
 });
 
+document.getElementById('approveMessageReview')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Saving approval...';
+  try {
+    await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/message-review/approve`, { method: 'POST' });
+    notify('Message approved', 'Your transcript review and message direction are saved.');
+    await loadRealWorkspace();
+    showStep(2);
+  } catch (error) {
+    notify('Approval needs attention', error.message);
+    button.disabled = false;
+    button.textContent = 'Approve & continue →';
+  }
+});
+
+document.getElementById('continueFromDirection')?.addEventListener('click', () => showStep(3));
+document.getElementById('continueFromDescription')?.addEventListener('click', () => showStep(4));
+document.querySelectorAll('[data-return-step]').forEach(button => button.addEventListener('click', () => showStep(Number(button.dataset.returnStep))));
 document.getElementById('startVisualAnalysis')?.addEventListener('click', async event => {
   const button = event.currentTarget;
   button.disabled = true;
