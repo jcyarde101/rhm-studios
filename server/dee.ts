@@ -66,15 +66,16 @@ async function loadDeeContext(ownerId: string, projectId?: string) {
     .eq('owner_id', ownerId);
   projectQuery = projectId ? projectQuery.eq('id', projectId) : projectQuery.order('created_at', { ascending: false }).limit(1);
   const { data: project } = await projectQuery.maybeSingle();
-  if (!project) return { project: null, transcript: '', review: null, userDirection: '', jobs: [], notes: [], recentMemory: [], plan: null };
+  if (!project) return { project: null, transcript: '', review: null, userDirection: '', jobs: [], notes: [], recentMemory: [], plan: null, visualAnalysis: null };
   const memoryCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [{ data: transcript }, { data: stage }, { data: jobs }, { data: notes }, { data: recentMemory }, { data: plan }] = await Promise.all([
+  const [{ data: transcript }, { data: stage }, { data: jobs }, { data: notes }, { data: recentMemory }, { data: plan }, { data: visualAnalysis }] = await Promise.all([
     adminClient.from('written_outputs').select('content').eq('devotional_id', project.id).eq('kind', 'transcript').order('version', { ascending: false }).limit(1).maybeSingle(),
     adminClient.from('workflow_stages').select('status,notes').eq('devotional_id', project.id).eq('stage', 'message').maybeSingle(),
     adminClient.from('processing_jobs').select('job_type,status,progress,error_message').eq('devotional_id', project.id).order('created_at', { ascending: false }),
     adminClient.from('dee_notes').select('id,title,content,category,scriptures,approved,source,created_at').eq('owner_id', ownerId).eq('devotional_id', project.id).order('created_at', { ascending: false }).limit(20),
     adminClient.from('dee_messages').select('devotional_id,role,content,created_at').eq('owner_id', ownerId).gte('created_at', memoryCutoff).order('created_at', { ascending: false }).limit(30),
-    adminClient.from('devotional_plans').select('big_idea,intended_audience,desired_outcome,research_notes,questions_to_explore,updated_at').eq('owner_id', ownerId).eq('devotional_id', project.id).maybeSingle()
+    adminClient.from('devotional_plans').select('big_idea,intended_audience,desired_outcome,research_notes,questions_to_explore,updated_at').eq('owner_id', ownerId).eq('devotional_id', project.id).maybeSingle(),
+    adminClient.from('visual_analyses').select('sampled_frame_count,sampling_interval_seconds,analysis,updated_at').eq('owner_id', ownerId).eq('devotional_id', project.id).maybeSingle()
   ]);
   let review = null;
   let userDirection = '';
@@ -85,7 +86,7 @@ async function loadDeeContext(ownerId: string, projectId?: string) {
       userDirection = typeof notes.userDirection === 'string' ? notes.userDirection : '';
     } catch {}
   }
-  return { project, transcript: transcript?.content ?? '', review, userDirection, jobs: jobs ?? [], notes: notes ?? [], recentMemory: (recentMemory ?? []).reverse(), plan };
+  return { project, transcript: transcript?.content ?? '', review, userDirection, jobs: jobs ?? [], notes: notes ?? [], recentMemory: (recentMemory ?? []).reverse(), plan, visualAnalysis };
 }
 
 function responseText(body: any) {
@@ -165,6 +166,7 @@ export async function askDee(ownerId: string, message: string, projectId?: strin
     aiMessageReview: context.review,
     creatorDirection: context.userDirection,
     preRecordingPlan: context.plan,
+    visualFrameAnalysis: context.visualAnalysis,
     transcript: context.transcript.slice(0, 60000),
     durableMinistryNotes: context.notes
   });
@@ -269,6 +271,7 @@ export async function draftDeeVideoDirection(ownerId: string, projectId: string,
     approvedDeeGuidance: guidance,
     creatorDirection: context.userDirection,
     messageReview: context.review,
+    visualFrameAnalysis: context.visualAnalysis,
     transcript: context.transcript.slice(0, 60000)
   });
   const response = await fetch('https://api.openai.com/v1/chat/completions', {

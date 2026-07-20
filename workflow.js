@@ -260,6 +260,61 @@ function attachRealVideo(videoUrl) {
   if (quality) quality.textContent = 'PRIVATE SOURCE VIDEO';
 }
 
+function fillVisualList(id, values, emptyText) {
+  const list = document.getElementById(id);
+  list.innerHTML = '';
+  (Array.isArray(values) && values.length ? values : [emptyText]).forEach(value => {
+    const item = document.createElement('li');
+    item.textContent = value;
+    list.append(item);
+  });
+}
+
+function renderVisualAnalysis(visualAnalysis, job) {
+  const panel = document.getElementById('visualAnalysisPanel');
+  const progressPanel = document.getElementById('visualAnalysisProgress');
+  const results = document.getElementById('visualAnalysisResults');
+  const startButton = document.getElementById('startVisualAnalysis');
+  if (visualAnalysis?.analysis) {
+    const analysis = visualAnalysis.analysis;
+    panel.dataset.state = 'ready';
+    document.getElementById('visualAnalysisStatus').textContent = 'VISUAL REVIEW READY';
+    progressPanel.hidden = true;
+    results.hidden = false;
+    document.getElementById('visualOverallSynopsis').textContent = analysis.overallVisualSynopsis || 'The sampled-frame review is ready.';
+    document.getElementById('visualSamplingNote').textContent = `${visualAnalysis.sampled_frame_count || 0} representative frames reviewed · baseline interval ${visualAnalysis.sampling_interval_seconds || 0} seconds plus detected scene changes.`;
+    fillVisualList('visualStrengths', analysis.presentationStrengths, 'No specific presentation strength was recorded.');
+    fillVisualList('visualIssues', analysis.visualIssues, 'No visible issue was flagged in the sampled frames.');
+    fillVisualList('visualElements', analysis.onScreenElements, 'No on-screen element was consistently detected.');
+    const opportunities = document.getElementById('visualEditOpportunities');
+    opportunities.innerHTML = '';
+    (analysis.editOpportunities || []).forEach(opportunity => {
+      const item = document.createElement('article');
+      item.className = 'visual-opportunity';
+      const time = document.createElement('b');
+      time.textContent = opportunity.timestamp || 'Timestamp';
+      const copy = document.createElement('p');
+      copy.textContent = [opportunity.recommendation, opportunity.rationale].filter(Boolean).join(' — ');
+      item.append(time, copy);
+      opportunities.append(item);
+    });
+    return;
+  }
+  results.hidden = true;
+  progressPanel.hidden = false;
+  const status = job?.status || 'waiting';
+  const progress = Math.max(0, Math.min(100, Number(job?.progress) || 0));
+  panel.dataset.state = status === 'failed' ? 'failed' : 'working';
+  document.getElementById('visualAnalysisStatus').textContent = status === 'running' ? 'ANALYZING FRAMES' : status === 'queued' ? 'QUEUED' : status === 'failed' ? 'NEEDS ATTENTION' : 'READY TO START';
+  document.getElementById('visualAnalysisPercent').textContent = `${progress}%`;
+  document.getElementById('visualAnalysisBar').style.width = `${progress}%`;
+  const phase = progress < 18 ? 'Extracting representative frames and scene changes' : progress < 84 ? 'Reviewing timestamped frames with Dee' : 'Combining visual findings with the transcript';
+  document.getElementById('visualAnalysisProgressTitle').textContent = status === 'running' ? phase : status === 'failed' ? 'Visual analysis paused' : status === 'queued' ? 'Visual analysis is queued' : 'Ready to analyze the video';
+  document.getElementById('visualAnalysisProgressCopy').textContent = status === 'failed' ? (job.error_message || 'The frame review could not finish. Retry when ready.') : 'This runs in the background and does not need to play the video in real time.';
+  startButton.hidden = status === 'queued' || status === 'running';
+  startButton.textContent = status === 'failed' ? 'Retry visual analysis' : 'Start visual analysis';
+}
+
 function renderRunwayDirectionPlan(plan) {
   if (!plan) return;
   document.getElementById('runwayDirectionTitle').textContent = plan.title || 'Approved Runway video direction';
@@ -326,12 +381,15 @@ function renderWorkspace(data) {
   const duration = document.querySelector('.timeline > span:last-child');
   if (duration) duration.textContent = formatWorkspaceTime(data.project.duration_seconds);
   renderPrimaryScripture(data.project.primary_scripture);
+  const visualJob = (data.jobs || []).find(item => item.job_type === 'visual_analysis');
+  renderVisualAnalysis(data.visualAnalysis, visualJob);
   renderRunwayDirectionPlan(data.videoDirection);
   if (!data.videoDirection) renderRunwayDirectionSynopsis(data.videoDirectionSynopsis);
   const job = (data.jobs || []).find(item => item.job_type === 'transcription');
   if (data.messageReview) renderMessageReview(data.messageReview, data.userDirection);
   else renderProcessingState(job);
-  const shouldPoll = !data.messageReview && (!job || job.status === 'queued' || job.status === 'running');
+  const visualActive = !data.visualAnalysis && visualJob && ['queued', 'running'].includes(visualJob.status);
+  const shouldPoll = (!data.messageReview && (!job || job.status === 'queued' || job.status === 'running')) || visualActive;
   if (shouldPoll && !workspacePoll) workspacePoll = window.setInterval(loadRealWorkspace, 8000);
   if (!shouldPoll && workspacePoll) {
     window.clearInterval(workspacePoll);
@@ -460,6 +518,21 @@ document.getElementById('approveSavedRunwaySynopsis')?.addEventListener('click',
     notify('Approval needs attention', error.message);
     button.disabled = false;
     button.textContent = 'Approve synopsis';
+  }
+});
+
+document.getElementById('startVisualAnalysis')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Queuing visual analysis...';
+  try {
+    await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/visual-analysis`, { method: 'POST' });
+    notify('Visual analysis queued', 'Dee will review representative frames and scene changes in the background.');
+    await loadRealWorkspace();
+  } catch (error) {
+    notify('Visual analysis needs attention', error.message);
+    button.disabled = false;
+    button.textContent = 'Retry visual analysis';
   }
 });
 

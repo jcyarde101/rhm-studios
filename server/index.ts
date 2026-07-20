@@ -343,7 +343,7 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const ownerId = res.locals.user.id;
   const projectId = String(req.params.projectId);
-  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }, { data: plan }, { data: videoDirectionStage }] = await Promise.all([
+  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }, { data: plan }, { data: videoDirectionStage }, { data: visualAnalysis }] = await Promise.all([
     adminClient
       .from('devotionals')
       .select('id,title,primary_scripture,recording_date,duration_seconds,status,created_at,media_assets(id,kind,storage_path,size_bytes,mime_type,metadata)')
@@ -384,6 +384,12 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
       .eq('devotional_id', projectId)
       .eq('owner_id', ownerId)
       .eq('stage', 'video_direction')
+      .maybeSingle(),
+    adminClient
+      .from('visual_analyses')
+      .select('status,sampled_frame_count,sampling_interval_seconds,analysis,updated_at')
+      .eq('devotional_id', projectId)
+      .eq('owner_id', ownerId)
       .maybeSingle()
   ]);
   if (projectError || !project) return res.status(404).json({ error: 'This video project could not be found.' });
@@ -412,7 +418,7 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
       else if (savedDirection?.approvalSynopsis) videoDirectionSynopsis = { title: savedDirection.title, synopsis: savedDirection.approvalSynopsis };
     } catch {}
   }
-  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionSynopsis, videoDirectionStage });
+  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionSynopsis, videoDirectionStage, visualAnalysis });
 });
 
 app.post('/api/projects/:projectId/message-review', requireUser, async (req, res) => {
@@ -471,6 +477,27 @@ app.post('/api/projects/:projectId/retry-processing', requireUser, async (req, r
   }).eq('id', job.id).eq('owner_id', ownerId);
   if (config.processingWorkerEnabled) void runQueuedProcessingJobs();
   res.json({ message: 'Transcription has been queued again.' });
+});
+
+app.post('/api/projects/:projectId/visual-analysis', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const [{ data: project }, { data: transcript }, { data: existingAnalysis }, { data: job }] = await Promise.all([
+    adminClient.from('devotionals').select('id').eq('id', projectId).eq('owner_id', ownerId).maybeSingle(),
+    adminClient.from('written_outputs').select('id').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('kind', 'transcript').limit(1).maybeSingle(),
+    adminClient.from('visual_analyses').select('devotional_id').eq('devotional_id', projectId).eq('owner_id', ownerId).maybeSingle(),
+    adminClient.from('processing_jobs').select('id,attempts').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('job_type', 'visual_analysis').order('created_at', { ascending: false }).limit(1).maybeSingle()
+  ]);
+  if (!project || !transcript) return res.status(409).json({ error: 'The transcript must be ready before visual analysis begins.' });
+  if (existingAnalysis) return res.json({ message: 'The visual analysis is already ready.' });
+  if (job) {
+    await adminClient.from('processing_jobs').update({ status: 'queued', progress: 0, error_message: null, started_at: null, completed_at: null, attempts: (job.attempts ?? 0) + 1 }).eq('id', job.id).eq('owner_id', ownerId);
+  } else {
+    await adminClient.from('processing_jobs').insert({ devotional_id: projectId, owner_id: ownerId, job_type: 'visual_analysis', provider: 'openai', status: 'queued', progress: 0 });
+  }
+  if (config.processingWorkerEnabled) void runQueuedProcessingJobs();
+  res.status(202).json({ message: 'Visual frame analysis has been queued.' });
 });
 
 app.post('/api/projects/planning', requireUser, async (req, res) => {

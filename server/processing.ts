@@ -21,6 +21,20 @@ type MessageReview = {
   suggestedEmphasis: string;
 };
 
+type VisualFrame = { path: string; timestampSeconds: number; timestamp: string };
+type VisualObservation = {
+  timestamp: string; framing: string; lighting: string; speakerPresence: string; gestureExpression: string;
+  onScreenText: string; qualityIssues: string[]; editOpportunities: string[];
+};
+
+function exactTimestamp(seconds: number) {
+  const value = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  const remainder = value % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+}
+
 function timestamp(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}:00`;
@@ -50,6 +64,116 @@ async function extractAudioChunks(sourceUrl: string, outputDirectory: string) {
   Readable.fromWeb(response.body as never).pipe(child.stdin);
   await completed;
   return (await readdir(outputDirectory)).filter(name => name.endsWith('.mp3')).sort().map(name => path.join(outputDirectory, name));
+}
+
+async function extractVisualFrames(sourceUrl: string, outputDirectory: string, durationSeconds: number, onProgress?: (fraction: number) => void): Promise<{ frames: VisualFrame[]; interval: number }> {
+  const interval = Math.max(6, Math.ceil((Math.max(1, durationSeconds) / 280) * 2) / 2);
+  const outputPattern = path.join(outputDirectory, 'frame-%05d.jpg');
+  const ffmpegPath = (ffmpeg as { path: string }).path;
+  const filter = `select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,${interval})+gt(scene\\,0.35)',scale=768:-2,showinfo`;
+  const child = spawn(ffmpegPath, [
+    '-hide_banner', '-loglevel', 'info', '-i', sourceUrl, '-an', '-vf', filter,
+    '-vsync', 'vfr', '-frames:v', '400', '-q:v', '5', outputPattern
+  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const timestamps: number[] = [];
+  let lineBuffer = '';
+  let errorOutput = '';
+  let lastReportedPercent = -1;
+  child.stderr.on('data', chunk => {
+    const text = chunk.toString();
+    errorOutput = (errorOutput + text).slice(-5000);
+    lineBuffer += text;
+    const lines = lineBuffer.split(/[\r\n]+/);
+    lineBuffer = lines.pop() || '';
+    for (const line of lines) {
+      const match = line.match(/showinfo.*pts_time:([0-9.]+)/);
+      if (match) timestamps.push(Number(match[1]));
+      const progressMatch = durationSeconds > 0 ? line.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/) : null;
+      if (progressMatch) {
+        const seconds = Number(progressMatch[1]) * 3600 + Number(progressMatch[2]) * 60 + Number(progressMatch[3]);
+        const percent = Math.min(99, Math.floor((seconds / durationSeconds) * 100));
+        if (percent >= lastReportedPercent + 2) {
+          lastReportedPercent = percent;
+          onProgress?.(percent / 100);
+        }
+      }
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', code => code === 0 ? resolve() : reject(new Error(`Visual frame extraction failed. ${errorOutput}`)));
+  });
+  const files = (await readdir(outputDirectory)).filter(name => /^frame-\d+\.jpg$/i.test(name)).sort().slice(0, 400);
+  const frames = files.map((name, index) => {
+    const timestampSeconds = Number.isFinite(timestamps[index]) ? timestamps[index] : index * interval;
+    return { path: path.join(outputDirectory, name), timestampSeconds, timestamp: exactTimestamp(timestampSeconds) };
+  });
+  return { frames, interval };
+}
+
+async function analyzeVisualFrameBatch(frames: VisualFrame[]): Promise<VisualObservation[]> {
+  const schema = {
+    type: 'object', additionalProperties: false, required: ['observations'],
+    properties: { observations: { type: 'array', items: { type: 'object', additionalProperties: false,
+      required: ['timestamp', 'framing', 'lighting', 'speakerPresence', 'gestureExpression', 'onScreenText', 'qualityIssues', 'editOpportunities'],
+      properties: {
+        timestamp: { type: 'string' }, framing: { type: 'string' }, lighting: { type: 'string' }, speakerPresence: { type: 'string' },
+        gestureExpression: { type: 'string' }, onScreenText: { type: 'string' }, qualityIssues: { type: 'array', items: { type: 'string' } },
+        editOpportunities: { type: 'array', items: { type: 'string' } }
+      }
+    } } }
+  };
+  const content: any[] = [{ type: 'text', text: 'Analyze every timestamped frame. Return one observation for each frame in the same order.' }];
+  for (const frame of frames) {
+    const image = (await readFile(frame.path)).toString('base64');
+    content.push({ type: 'text', text: `Timestamp ${frame.timestamp}` });
+    content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}`, detail: 'low' } });
+  }
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST', headers: { authorization: `Bearer ${openaiApiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini', temperature: 0.1,
+      response_format: { type: 'json_schema', json_schema: { name: 'devotional_visual_observations', strict: true, schema } },
+      messages: [
+        { role: 'system', content: 'You are a factual visual continuity analyst for RHM Studios. Inspect only visible evidence. Note framing, exposure and lighting, speaker presence, visible gestures or expressions without claiming private emotion, readable on-screen text, visible quality problems, and useful edit or clip opportunities. Do not assess theology from an image and do not invent action between sampled frames. Be concise.' },
+        { role: 'user', content }
+      ]
+    })
+  });
+  const body = await response.json().catch(() => ({})) as any;
+  const result = body?.choices?.[0]?.message?.content;
+  if (!response.ok || !result) throw new Error(body?.error?.message || `Visual frame analysis failed (${response.status}).`);
+  return (JSON.parse(result)?.observations || []) as VisualObservation[];
+}
+
+async function summarizeVisualAnalysis(observations: VisualObservation[], transcript: string, sampledFrameCount: number, interval: number) {
+  const schema = {
+    type: 'object', additionalProperties: false,
+    required: ['overallVisualSynopsis', 'presentationStrengths', 'visualIssues', 'onScreenElements', 'continuityNotes', 'editOpportunities', 'clipVisualCandidates', 'runwayPreparation'],
+    properties: {
+      overallVisualSynopsis: { type: 'string' }, presentationStrengths: { type: 'array', items: { type: 'string' } },
+      visualIssues: { type: 'array', items: { type: 'string' } }, onScreenElements: { type: 'array', items: { type: 'string' } },
+      continuityNotes: { type: 'array', items: { type: 'string' } },
+      editOpportunities: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['timestamp', 'recommendation', 'rationale'], properties: { timestamp: { type: 'string' }, recommendation: { type: 'string' }, rationale: { type: 'string' } } } },
+      clipVisualCandidates: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['timestamp', 'reason'], properties: { timestamp: { type: 'string' }, reason: { type: 'string' } } } },
+      runwayPreparation: { type: 'array', items: { type: 'string' } }
+    }
+  };
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST', headers: { authorization: `Bearer ${openaiApiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini', temperature: 0.15,
+      response_format: { type: 'json_schema', json_schema: { name: 'devotional_visual_analysis', strict: true, schema } },
+      messages: [
+        { role: 'system', content: 'Synthesize timestamped sampled-frame observations into an honest, useful visual editorial review. Distinguish visible evidence from recommendations. Align timestamps with the transcript when possible. Prioritize presentation quality, continuity, Scripture and graphic opportunities, respectful B-roll, clip readiness, and source ranges that may benefit from Runway. Never claim the unsampled frames were inspected.' },
+        { role: 'user', content: `Sampled ${sampledFrameCount} frames at a baseline interval of ${interval} seconds plus detected scene changes.\n\nTranscript excerpt:\n${transcript.slice(0, 30000)}\n\nFrame observations:\n${JSON.stringify(observations).slice(0, 120000)}` }
+      ]
+    })
+  });
+  const body = await response.json().catch(() => ({})) as any;
+  const result = body?.choices?.[0]?.message?.content;
+  if (!response.ok || !result) throw new Error(body?.error?.message || `Visual synthesis failed (${response.status}).`);
+  return JSON.parse(result);
 }
 
 async function transcribeChunk(filePath: string) {
@@ -121,6 +245,63 @@ async function saveMessageReview(devotionalId: string, ownerId: string, review: 
   if (error) throw error;
 }
 
+async function ensureVisualAnalysisJob(devotionalId: string, ownerId: string) {
+  const [{ count: existingJobs }, { data: existingAnalysis }] = await Promise.all([
+    adminClient.from('processing_jobs').select('id', { count: 'exact', head: true }).eq('devotional_id', devotionalId).eq('job_type', 'visual_analysis'),
+    adminClient.from('visual_analyses').select('devotional_id').eq('devotional_id', devotionalId).maybeSingle()
+  ]);
+  if (!existingJobs && !existingAnalysis) {
+    await adminClient.from('processing_jobs').insert({ devotional_id: devotionalId, owner_id: ownerId, job_type: 'visual_analysis', provider: 'openai', status: 'queued', progress: 0 });
+  }
+}
+
+async function processVisualAnalysisJob(job: any) {
+  const jobId = String(job.id);
+  const devotionalId = String(job.devotional_id);
+  const ownerId = String(job.owner_id);
+  const workDirectory = await mkdtemp(path.join(tmpdir(), 'rhm-visual-'));
+  try {
+    if (!openaiApiKey) throw new Error('OPENAI_API_KEY is not configured.');
+    const [{ data: existing }, { data: project }, { data: asset }, { data: transcript }] = await Promise.all([
+      adminClient.from('visual_analyses').select('devotional_id').eq('devotional_id', devotionalId).maybeSingle(),
+      adminClient.from('devotionals').select('duration_seconds').eq('id', devotionalId).eq('owner_id', ownerId).single(),
+      adminClient.from('media_assets').select('storage_path').eq('devotional_id', devotionalId).eq('owner_id', ownerId).eq('kind', 'source_video').single(),
+      adminClient.from('written_outputs').select('content').eq('devotional_id', devotionalId).eq('owner_id', ownerId).eq('kind', 'transcript').order('version', { ascending: false }).limit(1).maybeSingle()
+    ]);
+    if (existing) return void await updateJob(jobId, { status: 'completed', progress: 100, completed_at: new Date().toISOString(), error_message: null });
+    if (!asset || !transcript?.content) throw new Error('The source video and transcript must be ready before visual analysis.');
+    const { data: signed, error: signedError } = await adminClient.storage.from(mediaBucket).createSignedUrl(asset.storage_path, 60 * 60);
+    if (signedError || !signed?.signedUrl) throw new Error('A private source-video link could not be created for visual analysis.');
+    await updateJob(jobId, { status: 'running', progress: 5, started_at: new Date().toISOString(), error_message: null });
+    const extracted = await extractVisualFrames(signed.signedUrl, workDirectory, Number(project?.duration_seconds) || 0, fraction => {
+      void updateJob(jobId, { progress: 5 + Math.round(fraction * 12) });
+    });
+    if (!extracted.frames.length) throw new Error('No representative video frames could be extracted.');
+    await updateJob(jobId, { progress: 18 });
+    const observations: VisualObservation[] = [];
+    const batchSize = 20;
+    for (let index = 0; index < extracted.frames.length; index += batchSize) {
+      const batch = extracted.frames.slice(index, index + batchSize);
+      observations.push(...await analyzeVisualFrameBatch(batch));
+      const completed = Math.min(extracted.frames.length, index + batch.length);
+      await updateJob(jobId, { progress: 18 + Math.round((completed / extracted.frames.length) * 62) });
+    }
+    await updateJob(jobId, { progress: 84 });
+    const analysis = await summarizeVisualAnalysis(observations, transcript.content, extracted.frames.length, extracted.interval);
+    const { error } = await adminClient.from('visual_analyses').upsert({
+      devotional_id: devotionalId, owner_id: ownerId, status: 'ready', sampled_frame_count: extracted.frames.length,
+      sampling_interval_seconds: extracted.interval, observations, analysis, model_provider: 'openai:gpt-4o-mini'
+    }, { onConflict: 'devotional_id' });
+    if (error) throw error;
+    await updateJob(jobId, { status: 'completed', progress: 100, completed_at: new Date().toISOString(), error_message: null });
+  } catch (error: any) {
+    console.error('Visual analysis job failed', { jobId, devotionalId, message: error?.message });
+    await updateJob(jobId, { status: 'failed', error_message: String(error?.message || 'Unknown visual analysis error').slice(0, 1000) });
+  } finally {
+    await rm(workDirectory, { recursive: true, force: true });
+  }
+}
+
 async function processTranscriptionJob(job: any) {
   const jobId = String(job.id);
   const devotionalId = String(job.devotional_id);
@@ -138,6 +319,7 @@ async function processTranscriptionJob(job: any) {
     if (existingTranscript && existingMessageStage?.status === 'ready') {
       await updateJob(jobId, { status: 'completed', progress: 100, error_message: null, completed_at: new Date().toISOString() });
       await adminClient.from('devotionals').update({ status: 'review' }).eq('id', devotionalId);
+      await ensureVisualAnalysisJob(devotionalId, ownerId);
       return;
     }
 
@@ -180,6 +362,7 @@ async function processTranscriptionJob(job: any) {
     await saveMessageReview(devotionalId, ownerId, review);
     await updateJob(jobId, { status: 'completed', progress: 100, completed_at: new Date().toISOString() });
     await adminClient.from('devotionals').update({ status: 'review' }).eq('id', devotionalId);
+    await ensureVisualAnalysisJob(devotionalId, ownerId);
   } catch (error: any) {
     console.error('Transcription job failed', { jobId, devotionalId, message: error?.message });
     await updateJob(jobId, { status: 'failed', error_message: String(error?.message || 'Unknown processing error').slice(0, 1000) });
@@ -196,13 +379,14 @@ export async function runQueuedProcessingJobs() {
     while (true) {
       const { data: jobs, error } = await adminClient
         .from('processing_jobs')
-        .select('id,devotional_id,owner_id')
-        .eq('job_type', 'transcription')
+        .select('id,devotional_id,owner_id,job_type')
+        .in('job_type', ['transcription', 'visual_analysis'])
         .eq('status', 'queued')
         .order('created_at', { ascending: true })
         .limit(1);
       if (error || !jobs?.length) break;
-      await processTranscriptionJob(jobs[0]);
+      if (jobs[0].job_type === 'visual_analysis') await processVisualAnalysisJob(jobs[0]);
+      else await processTranscriptionJob(jobs[0]);
     }
   } finally {
     workerActive = false;
@@ -222,7 +406,7 @@ export async function recoverInterruptedProcessingJobs() {
       started_at: null,
       completed_at: null
     })
-    .eq('job_type', 'transcription')
+    .in('job_type', ['transcription', 'visual_analysis'])
     .eq('status', 'running');
   if (error) console.error('Interrupted processing jobs could not be recovered', { message: error.message });
 }
