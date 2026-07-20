@@ -133,8 +133,9 @@ function renderProcessingState(job) {
   document.getElementById('messageReviewProgress').textContent = `${progress}%`;
   const status = job?.status || 'queued';
   document.getElementById('messageReviewStatus').textContent = status === 'running' ? 'TRANSCRIBING' : status === 'failed' ? 'NEEDS ATTENTION' : 'QUEUED';
-  document.getElementById('messageReviewLoadingTitle').textContent = status === 'running' ? 'Listening carefully and preparing the AI message review' : 'Your transcript is in the processing queue';
-  document.getElementById('messageReviewLoadingCopy').textContent = status === 'running' ? 'Audio is being transcribed in sections. The synopsis will appear automatically when the complete message is ready.' : 'Processing will begin automatically. You may leave this workspace and return later.';
+  const phase = progress < 2 ? 'Starting the processing worker' : progress < 15 ? 'Downloading the private video and preparing its audio' : progress < 82 ? 'Transcribing the devotional in sections' : 'Creating your synopsis and message review';
+  document.getElementById('messageReviewLoadingTitle').textContent = status === 'running' ? phase : 'Your transcript is in the processing queue';
+  document.getElementById('messageReviewLoadingCopy').textContent = status === 'running' ? `The job is active at ${progress}%. Large recordings can remain in this stage while their audio is prepared. This page checks for updates automatically.` : 'Processing will begin automatically. You may leave this workspace and return later.';
   if (status === 'failed') document.getElementById('messageReviewErrorCopy').textContent = job.error_message || 'The transcript could not be completed. Retry when you are ready.';
   const sidebar = document.querySelector('.processing-card');
   sidebar?.querySelector('em') && (sidebar.querySelector('em').textContent = `${progress}%`);

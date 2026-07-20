@@ -128,6 +128,19 @@ async function processTranscriptionJob(job: any) {
   const workDirectory = await mkdtemp(path.join(tmpdir(), 'rhm-transcription-'));
   try {
     if (!openaiApiKey) throw new Error('OPENAI_API_KEY is not configured.');
+
+    // Retries must not redo a costly transcription when both finished outputs
+    // are already present (for example, after a browser showed stale state).
+    const [{ data: existingTranscript }, { data: existingMessageStage }] = await Promise.all([
+      adminClient.from('written_outputs').select('id').eq('devotional_id', devotionalId).eq('kind', 'transcript').limit(1).maybeSingle(),
+      adminClient.from('workflow_stages').select('id,status').eq('devotional_id', devotionalId).eq('stage', 'message').maybeSingle()
+    ]);
+    if (existingTranscript && existingMessageStage?.status === 'ready') {
+      await updateJob(jobId, { status: 'completed', progress: 100, error_message: null, completed_at: new Date().toISOString() });
+      await adminClient.from('devotionals').update({ status: 'review' }).eq('id', devotionalId);
+      return;
+    }
+
     await updateJob(jobId, { status: 'running', progress: 2, started_at: new Date().toISOString(), error_message: null });
     await adminClient.from('devotionals').update({ status: 'processing' }).eq('id', devotionalId);
     const { data: asset, error: assetError } = await adminClient
@@ -194,6 +207,24 @@ export async function runQueuedProcessingJobs() {
   } finally {
     workerActive = false;
   }
+}
+
+// A Render restart stops any in-process ffmpeg/transcription work, but the
+// database row remains "running". On a fresh server process there cannot be a
+// local worker that still owns those rows, so put them back in the queue.
+export async function recoverInterruptedProcessingJobs() {
+  const { error } = await adminClient
+    .from('processing_jobs')
+    .update({
+      status: 'queued',
+      progress: 0,
+      error_message: 'Processing was safely resumed after the studio restarted.',
+      started_at: null,
+      completed_at: null
+    })
+    .eq('job_type', 'transcription')
+    .eq('status', 'running');
+  if (error) console.error('Interrupted processing jobs could not be recovered', { message: error.message });
 }
 
 export async function regenerateMessageReview(devotionalId: string, ownerId: string, transcript: string, userDirection: string) {

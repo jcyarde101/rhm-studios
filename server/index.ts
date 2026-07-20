@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { adminClient, createRequestClient } from './supabase.js';
-import { regenerateMessageReview, runQueuedProcessingJobs } from './processing.js';
+import { recoverInterruptedProcessingJobs, regenerateMessageReview, runQueuedProcessingJobs } from './processing.js';
 import { askDee, listDeeVoices, synthesizeDeeSpeech, transcribeDeeAudio } from './dee.js';
 
 const app = express();
@@ -19,7 +19,10 @@ const publicFiles = [
   'library.css', 'library.js', 'rhm-brand.css', 'brand-media.css', 'session.js',
   'auth.css', 'auth.js'
 ];
-for (const file of publicFiles) app.get(`/${file}`, (_req, res) => res.sendFile(path.join(root, file)));
+for (const file of publicFiles) app.get(`/${file}`, (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(root, file));
+});
 app.use('/assets', express.static(path.join(root, 'assets'), { dotfiles: 'deny', index: false }));
 app.get('/vendor/tus.min.js', (_req, res) => res.sendFile(path.join(root, 'node_modules', 'tus-js-client', 'dist', 'tus.min.js')));
 
@@ -272,16 +275,27 @@ app.post('/api/projects/:projectId/message-review', requireUser, async (req, res
 app.post('/api/projects/:projectId/retry-processing', requireUser, async (req, res) => {
   const ownerId = res.locals.user.id;
   const projectId = String(req.params.projectId);
-  const { data: job } = await adminClient
-    .from('processing_jobs')
-    .select('id,status,attempts')
-    .eq('devotional_id', projectId)
-    .eq('owner_id', ownerId)
-    .eq('job_type', 'transcription')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const [{ data: job }, { data: transcript }, { data: messageStage }] = await Promise.all([
+    adminClient
+      .from('processing_jobs')
+      .select('id,status,attempts')
+      .eq('devotional_id', projectId)
+      .eq('owner_id', ownerId)
+      .eq('job_type', 'transcription')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    adminClient.from('written_outputs').select('id').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('kind', 'transcript').limit(1).maybeSingle(),
+    adminClient.from('workflow_stages').select('status').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('stage', 'message').maybeSingle()
+  ]);
   if (!job) return res.status(404).json({ error: 'No transcription job was found for this project.' });
+  if (transcript && messageStage?.status === 'ready') {
+    await Promise.all([
+      adminClient.from('processing_jobs').update({ status: 'completed', progress: 100, error_message: null, completed_at: new Date().toISOString() }).eq('id', job.id).eq('owner_id', ownerId),
+      adminClient.from('devotionals').update({ status: 'review' }).eq('id', projectId).eq('owner_id', ownerId)
+    ]);
+    return res.json({ message: 'The completed transcript and message review have been restored.', completed: true });
+  }
   if (job.status === 'running' || job.status === 'queued') return res.json({ message: 'Transcription is already processing.' });
   await adminClient.from('processing_jobs').update({
     status: 'queued',
@@ -438,7 +452,10 @@ app.use((_req, res) => res.status(404).send('Not found'));
 app.listen(config.port, () => {
   console.log(`RHM Studios running at ${config.appUrl}`);
   if (config.processingWorkerEnabled) {
-    setTimeout(() => void runQueuedProcessingJobs(), 1500);
+    setTimeout(() => void (async () => {
+      await recoverInterruptedProcessingJobs();
+      await runQueuedProcessingJobs();
+    })(), 1500);
     setInterval(() => void runQueuedProcessingJobs(), 60_000).unref();
   }
 });
