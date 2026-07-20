@@ -16,7 +16,7 @@ app.use(express.json({ limit: '1mb' }));
 
 const publicFiles = [
   'styles.css', 'app.js', 'workflow.css', 'workflow-image.css', 'workflow-message-review.css', 'dee-agent.css', 'workflow.js', 'dee-agent.js',
-  'library.css', 'library.js', 'rhm-brand.css', 'brand-media.css', 'session.js',
+  'library.css', 'library.js', 'rhm-brand.css', 'brand-media.css', 'session.js', 'voice-input.css', 'voice-input.js', 'workflow-accessibility.css',
   'auth.css', 'auth.js'
 ];
 for (const file of publicFiles) app.get(`/${file}`, (_req, res) => {
@@ -157,6 +157,69 @@ app.post('/api/dee/speak', requireUser, async (req, res) => {
   } catch (error: any) {
     console.error('Dee speech failed', { message: error?.message });
     res.status(502).json({ error: error?.message || 'Dee could not create a spoken response.' });
+  }
+});
+
+function decodeScriptureEntities(value: string) {
+  return value
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number(code)))
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>');
+}
+
+function scriptureHtmlToText(html: string) {
+  const passageHtml = html.match(/<div[^>]+id=["']bibletext["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? html;
+  const tokens = passageHtml.match(/<[^>]+>|[^<]+/g) ?? [];
+  let skipDepth = 0;
+  let result = '';
+  for (const token of tokens) {
+    if (token.startsWith('<')) {
+      const closing = /^<\//.test(token);
+      const ignoredOpening = !closing && /class=["'][^"']*\btn\b/i.test(token);
+      const ordinaryOpening = !closing && !/^<!|^<\?|\/>$/.test(token) && !/^<(br|hr|img|meta|link|input)\b/i.test(token);
+      if (skipDepth) {
+        if (ordinaryOpening) skipDepth += 1;
+        if (closing) skipDepth -= 1;
+        continue;
+      }
+      if (ignoredOpening) {
+        skipDepth = 1;
+        continue;
+      }
+      if (/^<br\b|^<\/(p|h\d|section|div)>/i.test(token)) result += '\n';
+      continue;
+    }
+    if (!skipDepth) result += decodeScriptureEntities(token);
+  }
+  return result.replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim();
+}
+
+app.get('/api/scripture', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  const reference = cleanText(req.query.reference, 120);
+  const requestedVersion = cleanText(req.query.version, 10).toUpperCase() || 'NLT';
+  const version = new Set(['NLT', 'NLTUK', 'NTV', 'KJV']).has(requestedVersion) ? requestedVersion : 'NLT';
+  if (!reference) return res.status(400).json({ error: 'Enter a scripture reference first.' });
+  try {
+    const url = new URL('https://api.nlt.to/api/passages');
+    url.searchParams.set('ref', reference);
+    url.searchParams.set('version', version);
+    url.searchParams.set('key', config.nltApiKey);
+    const response = await fetch(url, { headers: { accept: 'text/html' } });
+    const text = scriptureHtmlToText(await response.text());
+    if (!response.ok || !text) throw new Error(`Scripture provider returned ${response.status}.`);
+    res.json({
+      reference,
+      version,
+      text,
+      attribution: version.startsWith('NLT')
+        ? 'Scripture quotation marked NLT is taken from the Holy Bible, New Living Translation, copyright © 1996, 2004, 2015 by Tyndale House Foundation. Used by permission of Tyndale House Publishers, Inc. All rights reserved.'
+        : `${version} scripture text.`
+    });
+  } catch (error: any) {
+    console.error('Scripture lookup failed', { reference, version, message: error?.message });
+    res.status(502).json({ error: 'The scripture text could not be loaded right now. Your reference is still saved.' });
   }
 });
 

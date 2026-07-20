@@ -31,6 +31,8 @@ document.getElementById('replaceOutro')?.addEventListener('click',()=>notify('Br
 const workspaceProjectId = new URLSearchParams(window.location.search).get('project');
 let workspacePoll = null;
 let directionInitialized = false;
+let loadedScriptureKey = '';
+let currentPrimaryScripture = '';
 
 async function workspaceRequest(url, options = {}) {
   const response = await fetch(url, {
@@ -123,6 +125,42 @@ function renderMessageReview(review, userDirection) {
   }
 }
 
+function parseScriptureEntry(value) {
+  const raw = String(value || '').trim();
+  const versionMatch = raw.match(/\b(NLTUK|NLT|NTV|KJV)\b/i);
+  const version = versionMatch?.[1]?.toUpperCase() || 'NLT';
+  const reference = raw.replace(/\b(NLTUK|NLT|NTV|KJV)\b/ig, '').replace(/[(),]+$/g, '').trim();
+  return { reference, version };
+}
+
+async function renderPrimaryScripture(primaryScripture, force = false) {
+  const referenceElement = document.getElementById('scriptureReference');
+  const textElement = document.getElementById('scriptureText');
+  const attributionElement = document.getElementById('scriptureAttribution');
+  if (!referenceElement || !textElement || !attributionElement) return;
+  const { reference, version } = parseScriptureEntry(primaryScripture);
+  currentPrimaryScripture = String(primaryScripture || '');
+  const key = `${reference}|${version}`;
+  referenceElement.textContent = reference ? `${reference} · ${version}` : 'No reference entered';
+  if (!reference) {
+    textElement.textContent = 'Add a scripture reference when creating the project and include the translation, for example: Isaiah 40:31 NLT.';
+    attributionElement.textContent = '';
+    return;
+  }
+  if (!force && loadedScriptureKey === key) return;
+  loadedScriptureKey = key;
+  textElement.textContent = 'Loading the scripture text…';
+  attributionElement.textContent = '';
+  try {
+    const data = await workspaceRequest(`/api/scripture?reference=${encodeURIComponent(reference)}&version=${encodeURIComponent(version)}`);
+    textElement.textContent = data.text;
+    attributionElement.textContent = data.attribution;
+  } catch (error) {
+    loadedScriptureKey = '';
+    textElement.textContent = error.message;
+  }
+}
+
 function renderProcessingState(job) {
   const panel = document.getElementById('messageReviewPanel');
   const progress = Math.max(0, Math.min(100, Number(job?.progress) || 0));
@@ -171,6 +209,7 @@ function renderWorkspace(data) {
   renderTranscript(data.transcript);
   const duration = document.querySelector('.timeline > span:last-child');
   if (duration) duration.textContent = formatWorkspaceTime(data.project.duration_seconds);
+  renderPrimaryScripture(data.project.primary_scripture);
   const job = (data.jobs || []).find(item => item.job_type === 'transcription');
   if (data.messageReview) renderMessageReview(data.messageReview, data.userDirection);
   else renderProcessingState(job);
@@ -209,6 +248,49 @@ document.querySelector('.transcript')?.addEventListener('click', event => {
   if (video && Number.isFinite(seconds)) video.currentTime = seconds;
   const currentTime = document.querySelector('.timeline > span:first-child');
   if (currentTime) currentTime.textContent = paragraph.dataset.time.replace(/^00:/, '');
+});
+
+function openTranscriptModal() {
+  const modal = document.getElementById('transcriptModal');
+  const body = document.getElementById('transcriptModalBody');
+  const transcript = document.querySelector('.transcript');
+  if (!modal || !body || !transcript) return;
+  body.innerHTML = transcript.innerHTML;
+  modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  document.getElementById('closeTranscriptModal')?.focus();
+}
+
+function closeTranscriptModal() {
+  const modal = document.getElementById('transcriptModal');
+  if (!modal) return;
+  modal.hidden = true;
+  document.body.style.overflow = '';
+}
+
+const transcriptCard = document.querySelector('.transcript-card');
+if (transcriptCard) {
+  transcriptCard.id = 'transcriptCard';
+  transcriptCard.title = 'Open the transcript in a larger reading window';
+  const headerButton = transcriptCard.querySelector('.card-head button');
+  if (headerButton) {
+    headerButton.textContent = 'Expand ↗';
+    headerButton.type = 'button';
+    headerButton.addEventListener('click', openTranscriptModal);
+  }
+  const bottomButton = transcriptCard.querySelector(':scope > .outline-button');
+  if (bottomButton) {
+    bottomButton.textContent = 'Open full-size transcript';
+    bottomButton.type = 'button';
+    bottomButton.addEventListener('click', openTranscriptModal);
+  }
+  transcriptCard.querySelector('.card-head')?.addEventListener('dblclick', openTranscriptModal);
+}
+document.getElementById('closeTranscriptModal')?.addEventListener('click', closeTranscriptModal);
+document.querySelector('.reading-modal-backdrop')?.addEventListener('click', closeTranscriptModal);
+document.addEventListener('keydown', event => { if (event.key === 'Escape') closeTranscriptModal(); });
+document.getElementById('reloadScripture')?.addEventListener('click', () => {
+  renderPrimaryScripture(currentPrimaryScripture, true);
 });
 
 document.getElementById('refreshMessageReview')?.addEventListener('click', async event => {

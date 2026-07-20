@@ -17,5 +17,6 @@ export const config = {
   openaiApiKey: process.env.OPENAI_API_KEY?.trim() || '',
   elevenLabsApiKey: process.env.ELEVENLABS_API_KEY?.trim() || '',
   elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID?.trim() || '',
+  nltApiKey: process.env.NLT_API_KEY?.trim() || 'TEST',
   adminEmails: new Set((process.env.RHM_ADMIN_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean))
 };
