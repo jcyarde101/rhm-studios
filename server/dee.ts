@@ -3,6 +3,11 @@ import { adminClient } from './supabase.js';
 
 type ChatTurn = { role: 'user' | 'assistant'; content: string };
 type DeeNoteDraft = { shouldSave: boolean; title: string; content: string; category: 'insight' | 'question' | 'scripture' | 'direction' | 'action'; scriptures: string[] };
+type RunwayDirectionPlan = {
+  title: string; summary: string; editorialIntent: string; globalTreatment: string; audioDirection: string; brandDirection: string;
+  scenes: Array<{ sourceRange: string; purpose: string; runwayTool: 'Aleph 2.0 Edit Studio' | 'Gen-4.5 B-roll'; prompt: string; extraMotion: string; placement: string }>;
+  reviewChecklist: string[];
+};
 
 function requireOpenAI() {
   if (!config.openaiApiKey) throw new Error('OPENAI_API_KEY is not configured.');
@@ -235,6 +240,65 @@ Speak naturally, usually in a few focused paragraphs unless asked for depth. Ask
   try { note = await createDeeNote(ownerId, context.project.id, message, cleanReply); }
   catch (error: any) { console.error('Dee note extraction failed', { message: error?.message }); }
   return { reply: cleanReply, note, sources };
+}
+
+export async function approveDeeVideoDirection(ownerId: string, projectId: string, approvedGuidance: string) {
+  requireOpenAI();
+  const context = await loadDeeContext(ownerId, projectId);
+  if (!context.project) throw new Error('This devotional project could not be found.');
+  const guidance = String(approvedGuidance || '').trim().slice(0, 12000);
+  if (!guidance) throw new Error('Choose a substantive Dee response before approving video direction.');
+  const schema = {
+    type: 'object', additionalProperties: false,
+    required: ['title', 'summary', 'editorialIntent', 'globalTreatment', 'audioDirection', 'brandDirection', 'scenes', 'reviewChecklist'],
+    properties: {
+      title: { type: 'string' }, summary: { type: 'string' }, editorialIntent: { type: 'string' }, globalTreatment: { type: 'string' },
+      audioDirection: { type: 'string' }, brandDirection: { type: 'string' },
+      scenes: { type: 'array', items: { type: 'object', additionalProperties: false,
+        required: ['sourceRange', 'purpose', 'runwayTool', 'prompt', 'extraMotion', 'placement'],
+        properties: {
+          sourceRange: { type: 'string' }, purpose: { type: 'string' }, runwayTool: { type: 'string', enum: ['Aleph 2.0 Edit Studio', 'Gen-4.5 B-roll'] },
+          prompt: { type: 'string' }, extraMotion: { type: 'string' }, placement: { type: 'string' }
+        }
+      } },
+      reviewChecklist: { type: 'array', items: { type: 'string' } }
+    }
+  };
+  const sourceMaterial = JSON.stringify({
+    project: context.project,
+    approvedDeeGuidance: guidance,
+    creatorDirection: context.userDirection,
+    messageReview: context.review,
+    transcript: context.transcript.slice(0, 60000)
+  });
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${config.openaiApiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini', temperature: 0.15,
+      response_format: { type: 'json_schema', json_schema: { name: 'runway_video_direction', strict: true, schema } },
+      messages: [
+        { role: 'system', content: `You are Dee acting as RHM Studios' careful video-direction translator. Turn only the creator-approved guidance and actual project source material into a practical devotional video brief.
+
+The generative editing target is Runway Edit Studio with Aleph 2.0. Aleph edits source segments no longer than 30 seconds, so propose focused ranges rather than attempting to transform the whole devotional at once. Aleph prompts should be short, precise, and targeted: begin with an action such as add, change, replace, re-light, or re-style, then describe the desired transformation. Preserve the speaker, face, gestures, sermon meaning, and continuity unless the creator explicitly approved changing them. Use positive descriptions.
+
+For newly generated B-roll, target Runway Gen-4.5 and write direct visual prompts describing subject, scene, camera, lighting, and motion. B-roll must support rather than sensationalize the ministry message. Put audio cleanup, intro/outro, RHM watermark, scripture typography, captions, and lower thirds in their dedicated directions; do not pretend Aleph performs the entire traditional edit. Never claim a render is complete. Every proposed range remains subject to human preview and approval.` },
+        { role: 'user', content: `Create the Runway-aware video direction from this approved source material:\n${sourceMaterial}` }
+      ]
+    })
+  });
+  const body = await response.json().catch(() => ({})) as any;
+  const content = body?.choices?.[0]?.message?.content;
+  if (!response.ok || !content) throw new Error(body?.error?.message || `The Runway edit brief could not be created (${response.status}).`);
+  const plan = JSON.parse(content) as RunwayDirectionPlan;
+  const snapshot = { plan, approvedGuidance: guidance, runwayTarget: 'Edit Studio / Aleph 2.0 and Gen-4.5', generatedAt: new Date().toISOString(), source: 'dee' };
+  const { data: stage, error } = await adminClient.from('workflow_stages').upsert({
+    devotional_id: projectId, owner_id: ownerId, stage: 'video_direction', status: 'approved',
+    approved_at: new Date().toISOString(), approved_by: ownerId, notes: JSON.stringify(snapshot)
+  }, { onConflict: 'devotional_id,stage' }).select('id,status,approved_at,updated_at').single();
+  if (error || !stage) throw new Error('The approved Runway direction could not be saved.');
+  await adminClient.from('approval_events').insert({ devotional_id: projectId, owner_id: ownerId, entity_type: 'workflow_stage', entity_id: stage.id, action: 'approved', comment: 'Approved from Dee conversation for Runway-aware video direction.', snapshot });
+  return { plan, stage };
 }
 
 export async function getDeeMemory(ownerId: string, projectId: string) {

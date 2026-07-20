@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { adminClient, createRequestClient } from './supabase.js';
 import { recoverInterruptedProcessingJobs, regenerateMessageReview, runQueuedProcessingJobs } from './processing.js';
-import { approveDeeNote, askDee, deleteDeeNote, getDeeMemory, listDeeVoices, synthesizeDeeSpeech, transcribeDeeAudio } from './dee.js';
+import { approveDeeNote, approveDeeVideoDirection, askDee, deleteDeeNote, getDeeMemory, listDeeVoices, synthesizeDeeSpeech, transcribeDeeAudio } from './dee.js';
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -172,6 +172,19 @@ app.post('/api/dee/chat-stream', requireUser, async (req, res) => {
   }
 });
 
+app.post('/api/dee/video-direction', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const projectId = cleanText(req.body?.projectId, 100);
+  const approvedGuidance = cleanText(req.body?.approvedGuidance, 12000);
+  if (!projectId || !approvedGuidance) return res.status(400).json({ error: 'Choose a Dee response from an open project first.' });
+  try {
+    res.json(await approveDeeVideoDirection(res.locals.user.id, projectId, approvedGuidance));
+  } catch (error: any) {
+    console.error('Dee Runway direction failed', { message: error?.message });
+    res.status(502).json({ error: error?.message || 'Dee could not create the Runway edit direction.' });
+  }
+});
+
 app.get('/api/dee/memory', requireUser, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const projectId = cleanText(req.query.projectId, 100);
@@ -318,7 +331,7 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const ownerId = res.locals.user.id;
   const projectId = String(req.params.projectId);
-  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }, { data: plan }] = await Promise.all([
+  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }, { data: plan }, { data: videoDirectionStage }] = await Promise.all([
     adminClient
       .from('devotionals')
       .select('id,title,primary_scripture,recording_date,duration_seconds,status,created_at,media_assets(id,kind,storage_path,size_bytes,mime_type,metadata)')
@@ -352,6 +365,13 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
       .select('big_idea,intended_audience,desired_outcome,research_notes,questions_to_explore,updated_at')
       .eq('devotional_id', projectId)
       .eq('owner_id', ownerId)
+      .maybeSingle(),
+    adminClient
+      .from('workflow_stages')
+      .select('status,notes,approved_at,updated_at')
+      .eq('devotional_id', projectId)
+      .eq('owner_id', ownerId)
+      .eq('stage', 'video_direction')
       .maybeSingle()
   ]);
   if (projectError || !project) return res.status(404).json({ error: 'This video project could not be found.' });
@@ -371,7 +391,11 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
       userDirection = typeof notes.userDirection === 'string' ? notes.userDirection : '';
     } catch {}
   }
-  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source });
+  let videoDirection = null;
+  if (videoDirectionStage?.notes) {
+    try { videoDirection = JSON.parse(videoDirectionStage.notes)?.plan ?? null; } catch {}
+  }
+  res.json({ project, source, videoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionStage });
 });
 
 app.post('/api/projects/:projectId/message-review', requireUser, async (req, res) => {

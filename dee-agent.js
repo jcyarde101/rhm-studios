@@ -7,6 +7,10 @@ const deeMic = document.getElementById('deeMic');
 const deeVoice = document.getElementById('deeVoice');
 const deeError = document.getElementById('deeError');
 const deeAudio = document.getElementById('deeAudio');
+const deePlayback = document.getElementById('deePlayback');
+const deePlaybackStatus = document.getElementById('deePlaybackStatus');
+const deePlaybackTime = document.getElementById('deePlaybackTime');
+const deePause = document.getElementById('deePause');
 const deeNotes = document.getElementById('deeNotes');
 const deeNotesList = document.getElementById('deeNotesList');
 const deeNoteCount = document.getElementById('deeNoteCount');
@@ -42,6 +46,39 @@ function setDeeBusy(value) {
   deeMic.disabled = value && !deeRecorder;
 }
 
+function addVideoDirectionAction(message, guidance) {
+  if (!deeProjectId || message.querySelector('.dee-video-direction-action') || String(guidance || '').trim().length < 80) return;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'dee-video-direction-action';
+  button.textContent = 'Approve for video direction';
+  button.addEventListener('click', async () => {
+    const approved = window.confirm('Approve this guidance as the basis for the video edit? Dee will translate it into a Runway-aware brief. Nothing will render or publish yet.');
+    if (!approved) return;
+    button.disabled = true;
+    button.textContent = 'Building Runway edit brief...';
+    deeError.textContent = '';
+    try {
+      const response = await deeRequest('/api/dee/video-direction', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: deeProjectId, approvedGuidance: guidance })
+      });
+      const data = await response.json();
+      button.textContent = 'Approved for video direction ✓';
+      window.renderRunwayDirectionPlan?.(data.plan);
+      window.notify?.('Runway direction approved', 'Dee placed the production brief in the Video Edit stage for your review.');
+      deePanel.classList.remove('open');
+      deePanel.setAttribute('aria-hidden', 'true');
+      document.querySelector('.step[data-step="2"]')?.click();
+    } catch (error) {
+      deeError.textContent = error.message;
+      button.disabled = false;
+      button.textContent = 'Approve for video direction';
+    }
+  });
+  message.append(button);
+}
+
 function addDeeMessage(role, text, extraClass = '', sources = []) {
   const message = document.createElement('div');
   message.className = `dee-message ${role} ${extraClass}`.trim();
@@ -70,6 +107,7 @@ function addDeeMessage(role, text, extraClass = '', sources = []) {
     });
     if (sourceList.children.length > 1) message.append(sourceList);
   }
+  if (role === 'assistant' && !extraClass.includes('thinking')) addVideoDirectionAction(message, text);
   deeConversation.append(message);
   deeConversation.scrollTop = deeConversation.scrollHeight;
   return message;
@@ -166,6 +204,9 @@ async function playDeeSpeech(audioBlob, generation) {
   if (deeAudioUrl) URL.revokeObjectURL(deeAudioUrl);
   deeAudioUrl = URL.createObjectURL(audioBlob);
   deeAudio.src = deeAudioUrl;
+  deePlayback.hidden = false;
+  deePlaybackStatus.textContent = 'Dee is speaking';
+  deePause.textContent = 'Pause';
   await deeAudio.play();
   await new Promise(resolve => {
     const finish = () => {
@@ -196,6 +237,7 @@ async function drainDeeSpeechQueue() {
   } finally {
     deeSpeechRunning = false;
     if (deeSpeechQueue.length) void drainDeeSpeechQueue();
+    else if (!deeAudio.paused || deeAudio.ended) deePlaybackStatus.textContent = 'Finished';
   }
 }
 
@@ -208,6 +250,10 @@ function resetDeeSpeech() {
   deeAudio.load();
   if (deeAudioUrl) URL.revokeObjectURL(deeAudioUrl);
   deeAudioUrl = null;
+  deePlayback.hidden = true;
+  deePlaybackStatus.textContent = 'Dee is speaking';
+  deePlaybackTime.textContent = '0:00';
+  deePause.textContent = 'Pause';
 }
 
 function enqueueDeeSpeech(text) {
@@ -310,6 +356,7 @@ async function askDee(message) {
       if (sourceList.children.length > 1) thinking.append(sourceList);
     }
     deeHistory.push({ role: 'assistant', content: reply });
+    addVideoDirectionAction(thinking, reply);
     if (doneData?.note) await loadDeeMemory(false);
   } catch (error) {
     thinking.remove();
@@ -413,6 +460,33 @@ deeInput?.addEventListener('keydown', event => {
 });
 deeMic?.addEventListener('click', toggleDeeRecording);
 deeVoice?.addEventListener('change', () => localStorage.setItem('rhm-dee-voice', deeVoice.value));
+deeAudio?.addEventListener('timeupdate', () => {
+  const seconds = Math.max(0, Math.floor(deeAudio.currentTime || 0));
+  deePlaybackTime.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+});
+deeAudio?.addEventListener('pause', () => {
+  if (!deeAudio.ended && deeAudio.currentTime > 0 && !deePlayback.hidden) {
+    deePlaybackStatus.textContent = 'Paused';
+    deePause.textContent = 'Resume';
+  }
+});
+deeAudio?.addEventListener('play', () => {
+  if (!deePlayback.hidden) {
+    deePlaybackStatus.textContent = 'Dee is speaking';
+    deePause.textContent = 'Pause';
+  }
+});
+deePause?.addEventListener('click', () => {
+  if (!deeAudio.src) return;
+  if (deeAudio.paused) deeAudio.play().catch(error => { deeError.textContent = `Playback could not resume: ${error.message}`; });
+  else deeAudio.pause();
+});
+document.getElementById('deeRewind')?.addEventListener('click', () => {
+  if (!deeAudio.src) return;
+  deeAudio.currentTime = Math.max(0, deeAudio.currentTime - 10);
+  if (deeAudio.paused) deeAudio.play().catch(() => {});
+});
+document.getElementById('deeStop')?.addEventListener('click', resetDeeSpeech);
 document.getElementById('previewDeeVoice')?.addEventListener('click', async event => {
   const voice = deeVoices.find(item => item.id === deeVoice.value);
   if (!voice?.previewUrl) return void (deeError.textContent = 'This voice does not include a preview. Ask Dee a question to hear it.');

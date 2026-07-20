@@ -260,6 +260,47 @@ function attachRealVideo(videoUrl) {
   if (quality) quality.textContent = 'PRIVATE SOURCE VIDEO';
 }
 
+function renderRunwayDirectionPlan(plan) {
+  if (!plan) return;
+  document.getElementById('runwayDirectionTitle').textContent = plan.title || 'Approved Runway video direction';
+  document.getElementById('runwayDirectionSummary').textContent = plan.summary || '';
+  document.getElementById('runwayDirectionStatus').textContent = 'APPROVED · READY FOR PREVIEWS';
+  document.getElementById('runwayEditorialIntent').textContent = plan.editorialIntent || '';
+  document.getElementById('runwayGlobalTreatment').textContent = plan.globalTreatment || '';
+  document.getElementById('runwayAudioBrand').textContent = [plan.audioDirection, plan.brandDirection].filter(Boolean).join(' ');
+  const scenes = document.getElementById('runwayScenes');
+  scenes.innerHTML = '';
+  (plan.scenes || []).forEach(scene => {
+    const article = document.createElement('article');
+    article.className = 'runway-scene';
+    const range = document.createElement('span');
+    range.textContent = scene.sourceRange || 'Selected range';
+    const details = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = `${scene.runwayTool || 'Runway'} · ${scene.purpose || 'Visual treatment'}`;
+    const prompt = document.createElement('p');
+    prompt.textContent = scene.prompt || '';
+    const placement = document.createElement('small');
+    placement.textContent = [scene.placement, scene.extraMotion ? `Extra motion: ${scene.extraMotion}` : ''].filter(Boolean).join(' · ');
+    details.append(title, prompt, placement);
+    article.append(range, details);
+    scenes.append(article);
+  });
+  const checklist = document.getElementById('runwayReviewChecklist');
+  checklist.innerHTML = '';
+  (plan.reviewChecklist || []).forEach(item => {
+    const entry = document.createElement('li');
+    entry.textContent = item;
+    checklist.append(entry);
+  });
+  document.getElementById('runwayDirectionContent').hidden = false;
+  const badge = document.querySelector('[data-panel="2"] .ready-badge');
+  if (badge) badge.textContent = 'RUNWAY BRIEF APPROVED';
+  const step = document.querySelector('.step[data-step="2"]');
+  if (step) step.querySelector('b').textContent = 'READY';
+}
+window.renderRunwayDirectionPlan = renderRunwayDirectionPlan;
+
 function renderWorkspace(data) {
   document.title = `${data.project.title} · RHM Studios`;
   const headerTitle = document.querySelector('.project-name strong');
@@ -276,6 +317,7 @@ function renderWorkspace(data) {
   const duration = document.querySelector('.timeline > span:last-child');
   if (duration) duration.textContent = formatWorkspaceTime(data.project.duration_seconds);
   renderPrimaryScripture(data.project.primary_scripture);
+  renderRunwayDirectionPlan(data.videoDirection);
   const job = (data.jobs || []).find(item => item.job_type === 'transcription');
   if (data.messageReview) renderMessageReview(data.messageReview, data.userDirection);
   else renderProcessingState(job);
