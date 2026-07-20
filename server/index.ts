@@ -539,7 +539,7 @@ app.post('/api/projects/:projectId/render/start', requireUser, async (req, res) 
       .eq('devotional_id', projectId).eq('owner_id', ownerId).eq('stage', 'message');
   }
   const { data: job, error } = await adminClient.from('processing_jobs').insert({
-    devotional_id: projectId, owner_id: ownerId, job_type: 'full_render', provider: 'runway+ffmpeg', status: 'queued', progress: 1
+    devotional_id: projectId, owner_id: ownerId, job_type: 'full_render', provider: 'rhm-ffmpeg-master', status: 'queued', progress: 1
   }).select('id,job_type,status,progress,created_at').single();
   if (error || !job) return res.status(500).json({ error: 'The full video render request could not be saved.' });
   await adminClient.from('workflow_stages').upsert({
