@@ -438,7 +438,13 @@ function productionJobState(job, label) {
 function renderProductionStatus(data) {
   const jobs = data.jobs || [];
   const videoJob = findProductionJob(jobs, ['full_render', 'video_render', 'runway_render', 'render']);
-  const video = productionJobState(videoJob, 'The edited full video');
+  let video = productionJobState(videoJob, 'The edited full video');
+  if (data.enhancedVideo && data.enhancedVideoUrl) {
+    video = { state: 'ready', progress: 100, badge: 'READY FOR REVIEW', title: 'Your rendered video is ready', copy: 'Preview the completed edit, then approve it or reject and delete it.' };
+  }
+  if (videoJob?.status === 'completed' && !data.enhancedVideo) {
+    video = { state: 'waiting', progress: 0, badge: 'EDIT REMOVED', title: 'The rejected edit was deleted', copy: 'The original source video is safe. Start a revised render when you are ready.' };
+  }
   const sidebar = document.getElementById('productionStatusCard');
   sidebar.dataset.state = video.state;
   document.getElementById('productionStatusLabel').textContent = video.title;
@@ -461,13 +467,25 @@ function renderProductionStatus(data) {
   videoPreview.textContent = video.state === 'ready' && data.enhancedVideoUrl ? 'Preview full video' : video.state === 'ready' ? 'Preparing preview link' : 'Preview unavailable';
   videoPreview.onclick = data.enhancedVideoUrl ? () => window.open(data.enhancedVideoUrl, '_blank', 'noopener') : null;
   const descriptionApproved = Boolean(data.shortDescription?.approved);
+  const finalApproved = data.finalStage?.status === 'approved' && Boolean(data.enhancedVideo);
   const descriptionStatus = document.getElementById('finalDescriptionStatus');
   descriptionStatus.textContent = descriptionApproved ? 'APPROVED' : 'AWAITING APPROVAL';
   descriptionStatus.className = descriptionApproved ? '' : 'working';
-  document.getElementById('finalApprovalTitle').textContent = video.state === 'ready' ? 'The rendered master video needs final preview verification.' : 'Waiting for the actual full-video render.';
-  document.getElementById('finalApprovalCopy').textContent = 'This button remains locked until the polished main video has a real reviewable file.';
-  document.getElementById('approveFinalPackage').disabled = true;
-  return { videoJob };
+  document.getElementById('finalApprovalTitle').textContent = finalApproved ? 'The final video is approved.' : video.state === 'ready' ? 'Your rendered video is ready for final review.' : 'Waiting for the completed video.';
+  document.getElementById('finalApprovalCopy').textContent = finalApproved ? 'This master is locked in. Thumbnail and social-clip production can begin.' : 'Preview the full video above. Approve it if it is ready, or reject and delete this rendered copy.';
+  const approveButton = document.getElementById('approveFinalPackage');
+  approveButton.disabled = finalApproved || video.state !== 'ready' || !data.enhancedVideoUrl;
+  approveButton.textContent = finalApproved ? '✓ Final video approved' : 'Approve final video';
+  const rejectButton = document.getElementById('rejectFinalVideo');
+  rejectButton.disabled = finalApproved || video.state !== 'ready' || !data.enhancedVideo;
+  rejectButton.hidden = finalApproved;
+  const nextPhase = document.getElementById('nextProductionPhase');
+  nextPhase.dataset.state = finalApproved ? 'unlocked' : 'locked';
+  document.getElementById('nextPhaseStatus').textContent = finalApproved ? 'UNLOCKED · FINAL VIDEO APPROVED' : 'LOCKED · APPROVE THE FINAL VIDEO FIRST';
+  document.getElementById('nextPhaseCopy').textContent = finalApproved ? 'The approved master is ready to become thumbnails and social-media clips.' : 'Once you approve the final video, thumbnail and clip production will unlock.';
+  document.getElementById('stepFourGuidance').textContent = finalApproved ? 'The final video is approved. Your next production phase is thumbnails and social-media clips.' : video.state === 'ready' ? 'The render is complete. Preview the full video, then approve it or reject it.' : ['running', 'queued'].includes(video.state) ? 'Your video is rendering. You can leave this page and return; progress is saved.' : 'Confirm the three items below, then start the render.';
+  setWorkflowStepState(4, finalApproved);
+  return { videoJob, finalApproved };
 }
 
 function setWorkflowStepState(number, approved) {
@@ -512,15 +530,15 @@ function renderProductionHandoff(data) {
   fill('Description', descriptionApproved, description.title || 'Video description', (description.paragraphs || []).join(' '), description.foundationalScripture ? `Foundational Scripture: ${description.foundationalScripture}` : 'Transcript-based posting copy.');
 
   const renderJob = findProductionJob(data.jobs || [], ['full_render', 'video_render', 'runway_render', 'render']);
-  const renderBlocksStart = Boolean(renderJob && ['queued', 'running', 'completed'].includes(renderJob.status));
+  const renderBlocksStart = Boolean(renderJob && ['queued', 'running'].includes(renderJob.status));
   const canStart = ready && !renderBlocksStart;
   const startButton = document.getElementById('startFullRender');
   startButton.disabled = !canStart;
-  document.getElementById('renderStartTitle').textContent = renderBlocksStart ? 'The full video render has already been submitted.' : renderJob?.status === 'failed' ? 'The previous render stopped. You can safely try again.' : ready ? 'Everything is approved. You control when production begins.' : 'Finish the approvals marked above.';
+  document.getElementById('renderStartTitle').textContent = renderBlocksStart ? 'The full video render is in progress.' : renderJob?.status === 'failed' ? 'The previous render stopped. You can safely try again.' : renderJob?.status === 'completed' ? 'You can produce a revised render from the approved edit plan.' : ready ? 'Everything is approved. You control when production begins.' : 'Finish the approvals marked above.';
   document.getElementById('renderStartCopy').textContent = renderBlocksStart ? 'Use the live status above to follow the job.' : ready ? 'Starting submits the approved production plan. It will not publish the video.' : 'Nothing will be submitted until all three approvals are saved.';
-  startButton.textContent = renderJob?.status === 'failed' ? 'Retry full video render' : 'Start full video render';
-  document.getElementById('renderStartBar').hidden = renderBlocksStart;
-  document.getElementById('finalApprovalBar').hidden = renderJob?.status !== 'completed';
+  startButton.textContent = renderJob?.status === 'failed' ? 'Retry full video render' : renderJob?.status === 'completed' ? 'Render revised full video' : 'Start full video render';
+  document.getElementById('renderStartBar').hidden = renderBlocksStart || Boolean(data.enhancedVideo);
+  document.getElementById('finalApprovalBar').hidden = false;
   return ready;
 }
 
@@ -718,6 +736,39 @@ document.getElementById('startFullRender')?.addEventListener('click', async even
     button.textContent = 'Start full video render';
   }
 });
+
+document.getElementById('rejectFinalVideo')?.addEventListener('click', async event => {
+  if (!window.confirm('Reject and permanently delete this rendered edit?\n\nThe original source video, transcript, and approved direction will be preserved. This cannot be undone.')) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Deleting rejected edit...';
+  try {
+    const result = await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/render/reject`, { method: 'DELETE' });
+    notify('Rejected edit deleted', result.message);
+    await loadRealWorkspace();
+  } catch (error) {
+    notify('Edit could not be deleted', error.message);
+    button.disabled = false;
+    button.textContent = 'Reject & delete edit';
+  }
+});
+
+document.getElementById('approveFinalPackage')?.addEventListener('click', async event => {
+  if (!window.confirm('Approve this as the final master video?\n\nThis unlocks thumbnail and social-media clip production.')) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Saving final approval...';
+  try {
+    const result = await workspaceRequest(`/api/projects/${encodeURIComponent(workspaceProjectId)}/render/approve`, { method: 'POST' });
+    notify('Final video approved', result.message);
+    await loadRealWorkspace();
+  } catch (error) {
+    notify('Approval could not be saved', error.message);
+    button.disabled = false;
+    button.textContent = 'Approve final video';
+  }
+});
+
 document.getElementById('startVisualAnalysis')?.addEventListener('click', async event => {
   const button = event.currentTarget;
   button.disabled = true;

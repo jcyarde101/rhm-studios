@@ -355,7 +355,7 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const ownerId = res.locals.user.id;
   const projectId = String(req.params.projectId);
-  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }, { data: plan }, { data: videoDirectionStage }, { data: visualAnalysis }, { data: shortDescriptionOutput }] = await Promise.all([
+  const [{ data: project, error: projectError }, { data: transcript }, { data: messageStage }, { data: jobs }, { data: plan }, { data: videoDirectionStage }, { data: visualAnalysis }, { data: shortDescriptionOutput }, { data: finalStage }] = await Promise.all([
     adminClient
       .from('devotionals')
       .select('id,title,primary_scripture,recording_date,duration_seconds,status,created_at,media_assets(id,kind,storage_path,size_bytes,mime_type,metadata)')
@@ -411,6 +411,13 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
       .eq('kind', 'short_description')
       .order('version', { ascending: false })
       .limit(1)
+      .maybeSingle(),
+    adminClient
+      .from('workflow_stages')
+      .select('id,status,notes,approved_at,updated_at')
+      .eq('devotional_id', projectId)
+      .eq('owner_id', ownerId)
+      .eq('stage', 'final')
       .maybeSingle()
   ]);
   if (projectError || !project) return res.status(404).json({ error: 'This video project could not be found.' });
@@ -447,7 +454,7 @@ app.get('/api/projects/:projectId/workspace', requireUser, async (req, res) => {
   }
   const parsedShortDescription = parseShortDescription(shortDescriptionOutput?.content);
   const shortDescription = parsedShortDescription ? { ...parsedShortDescription, approved: Boolean(shortDescriptionOutput?.approved), updatedAt: shortDescriptionOutput?.updated_at } : null;
-  res.json({ project, source, videoUrl, enhancedVideo, enhancedVideoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionSynopsis, videoDirectionStage, visualAnalysis, shortDescription });
+  res.json({ project, source, videoUrl, enhancedVideo, enhancedVideoUrl, transcript: transcript?.content ?? null, messageReview, userDirection, messageStage, jobs: jobs ?? [], plan, planningMode: !source, videoDirection, videoDirectionSynopsis, videoDirectionStage, visualAnalysis, shortDescription, finalStage });
 });
 
 app.post('/api/projects/:projectId/writing/short-description', requireUser, async (req, res) => {
@@ -523,7 +530,7 @@ app.post('/api/projects/:projectId/render/start', requireUser, async (req, res) 
   ]);
   if (!project) return res.status(404).json({ error: 'This video project could not be found.' });
   const existingJob = existingJobs?.[0];
-  if (existingJob && ['queued', 'running', 'completed'].includes(existingJob.status)) return res.status(409).json({ error: 'The full video render has already been submitted.', job: existingJob });
+  if (existingJob && ['queued', 'running'].includes(existingJob.status)) return res.status(409).json({ error: 'The full video render is already in progress.', job: existingJob });
   const sourceReady = (project.media_assets || []).some((asset: any) => asset.kind === 'source_video' && asset.metadata?.upload_state === 'complete');
   const stageMap = new Map((stages || []).map((stage: any) => [stage.stage, stage.status]));
   const messageReady = ['ready', 'approved'].includes(String(stageMap.get('message') || ''));
@@ -539,7 +546,7 @@ app.post('/api/projects/:projectId/render/start', requireUser, async (req, res) 
       .eq('devotional_id', projectId).eq('owner_id', ownerId).eq('stage', 'message');
   }
   const { data: job, error } = await adminClient.from('processing_jobs').insert({
-    devotional_id: projectId, owner_id: ownerId, job_type: 'full_render', provider: 'rhm-ffmpeg-master', status: 'queued', progress: 1
+    devotional_id: projectId, owner_id: ownerId, job_type: 'full_render', provider: 'runway-gen4.5-plus-ffmpeg', status: 'queued', progress: 1
   }).select('id,job_type,status,progress,created_at').single();
   if (error || !job) return res.status(500).json({ error: 'The full video render request could not be saved.' });
   await adminClient.from('workflow_stages').upsert({
@@ -548,6 +555,65 @@ app.post('/api/projects/:projectId/render/start', requireUser, async (req, res) 
   }, { onConflict: 'devotional_id,stage' });
   if (config.processingWorkerEnabled) void runQueuedProcessingJobs();
   res.status(202).json({ job, message: 'Your approved full-video render has been submitted.' });
+});
+
+app.delete('/api/projects/:projectId/render/reject', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const [{ data: project }, { data: renderedAssets }] = await Promise.all([
+    adminClient.from('devotionals').select('id').eq('id', projectId).eq('owner_id', ownerId).maybeSingle(),
+    adminClient.from('media_assets').select('id,storage_path,size_bytes,metadata').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('kind', 'enhanced_video')
+  ]);
+  if (!project) return res.status(404).json({ error: 'This video project could not be found.' });
+  if (!renderedAssets?.length) return res.status(404).json({ error: 'There is no rendered edit to reject. The original source video was not changed.' });
+
+  const storagePaths = renderedAssets.map(asset => asset.storage_path).filter(Boolean);
+  const { error: storageError } = await adminClient.storage.from(videoBucket).remove(storagePaths);
+  if (storageError) return res.status(502).json({ error: `The rendered edit could not be removed from storage: ${storageError.message}` });
+  const assetIds = renderedAssets.map(asset => asset.id);
+  const { error: recordError } = await adminClient.from('media_assets').delete().in('id', assetIds).eq('owner_id', ownerId).eq('kind', 'enhanced_video');
+  if (recordError) return res.status(500).json({ error: 'The video file was removed, but its media record needs cleanup.' });
+
+  const rejectedAt = new Date().toISOString();
+  await Promise.all([
+    adminClient.from('workflow_stages').update({ status: 'changes_requested', approved_at: null, approved_by: null, notes: JSON.stringify({ rejectedAt, reason: 'Rendered edit rejected and deleted; source media preserved.' }) })
+      .eq('devotional_id', projectId).eq('owner_id', ownerId).eq('stage', 'final'),
+    adminClient.from('approval_events').insert({
+      devotional_id: projectId, owner_id: ownerId, entity_type: 'rendered_edit', entity_id: assetIds[0], action: 'rejected',
+      comment: 'Creator rejected and permanently deleted the rendered edit. Original source media was preserved.',
+      snapshot: { deletedAssetIds: assetIds, deletedStoragePaths: storagePaths, freedBytes: renderedAssets.reduce((sum, asset) => sum + Number(asset.size_bytes || 0), 0), rejectedAt }
+    })
+  ]);
+  const freedBytes = renderedAssets.reduce((sum, asset) => sum + Number(asset.size_bytes || 0), 0);
+  res.json({ message: 'The rejected edit was permanently deleted. Your original source video and project work are safe.', deletedCount: renderedAssets.length, freedBytes });
+});
+
+app.post('/api/projects/:projectId/render/approve', requireUser, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ownerId = res.locals.user.id;
+  const projectId = String(req.params.projectId);
+  const [{ data: asset }, { data: stage }] = await Promise.all([
+    adminClient.from('media_assets').select('id,storage_path,size_bytes,metadata').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('kind', 'enhanced_video').maybeSingle(),
+    adminClient.from('workflow_stages').select('id,status').eq('devotional_id', projectId).eq('owner_id', ownerId).eq('stage', 'final').maybeSingle()
+  ]);
+  if (!asset) return res.status(409).json({ error: 'There is no rendered video file to approve.' });
+  if (!stage) return res.status(409).json({ error: 'The final review stage has not been prepared.' });
+  if (stage.status === 'approved') return res.json({ message: 'The final video is already approved.' });
+
+  const renderJobId = typeof asset.metadata === 'object' && asset.metadata ? String((asset.metadata as Record<string, unknown>).render_job_id || '') : '';
+  const { data: job } = renderJobId ? await adminClient.from('processing_jobs').select('id,status,completed_at').eq('id', renderJobId).eq('devotional_id', projectId).eq('owner_id', ownerId).maybeSingle() : { data: null };
+  if (!job || job.status !== 'completed') return res.status(409).json({ error: 'The rendered video file is not linked to a completed render job.' });
+
+  const approvedAt = new Date().toISOString();
+  const { data: approved, error } = await adminClient.from('workflow_stages').update({ status: 'approved', approved_at: approvedAt, approved_by: ownerId, notes: JSON.stringify({ renderJobId: job.id, enhancedVideoAssetId: asset.id, approvedAt }) })
+    .eq('id', stage.id).eq('owner_id', ownerId).select('id,status,approved_at').single();
+  if (error || !approved) return res.status(500).json({ error: 'Final video approval could not be saved.' });
+  await adminClient.from('approval_events').insert({
+    devotional_id: projectId, owner_id: ownerId, entity_type: 'rendered_edit', entity_id: asset.id, action: 'approved',
+    comment: 'Creator approved the rendered master video.', snapshot: { renderJobId: job.id, storagePath: asset.storage_path, approvedAt }
+  });
+  res.json({ stage: approved, message: 'Final video approved. Thumbnail and social-clip production are now unlocked.' });
 });
 
 app.post('/api/projects/:projectId/message-review', requireUser, async (req, res) => {
@@ -859,7 +925,10 @@ app.get('/api/health', (_req, res) => res.json({
   integrations: { openaiConfigured: Boolean(config.openaiApiKey), elevenLabsConfigured: Boolean(config.elevenLabsApiKey) }
 }));
 app.get(['/', '/index.html'], requireUser, (_req, res) => res.sendFile(path.join(root, 'index.html')));
-app.get('/workflow.html', requireUser, (_req, res) => res.sendFile(path.join(root, 'workflow.html')));
+app.get('/workflow.html', requireUser, (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(root, 'workflow.html'));
+});
 app.get('/library.html', requireUser, (_req, res) => res.sendFile(path.join(root, 'library.html')));
 
 app.use((_req, res) => res.status(404).send('Not found'));

@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="workflow-accessibility.css?v=20260720">
   <link rel="stylesheet" href="planning-workspace.css?v=20260720">
   <link rel="stylesheet" href="written-description.css?v=20260720">
-  <link rel="stylesheet" href="render-status.css?v=20260720-production-handoff">
+  <link rel="stylesheet" href="render-status.css?v=20260721-final-review-v2">
 </head>
 <body>
   <header class="topbar"><a href="index.html" class="back">← <img src="assets/rhm-logo.png" alt="RHM"><span>RHM Studios</span></a><div class="project-name"><strong>Finding Peace in the Waiting</strong><small>Draft saved just now</small></div><div class="header-actions"><button class="quiet" data-signout>Sign out</button><button class="quiet" id="previewAll" disabled>Full preview unavailable</button><button class="gold-button" id="finalizeButton">Review final package →</button></div></header>
@@ -124,7 +124,7 @@
       </section>
 
       <section class="stage" data-panel="4">
-        <div class="stage-heading"><div><span class="kicker">STEP 4 OF 4 · PRODUCTION HANDOFF</span><h1>Review everything before rendering</h1><p>This is one consolidated record of what you approved in Steps 1–3. Nothing is submitted to Runway until you start the full render.</p></div><span class="ready-badge rendering" id="finalRenderBadge">CHECKING APPROVALS</span></div>
+        <div class="stage-heading"><div><span class="kicker">STEP 4 OF 4 · RENDER AND REVIEW</span><h1>Render, review, and approve the final video</h1><p id="stepFourGuidance">First start the render. When it finishes, preview the completed video and either approve it or reject it.</p></div><span class="ready-badge rendering" id="finalRenderBadge">CHECKING STATUS</span></div>
         <section class="production-handoff" id="productionHandoff">
           <header><div><span>APPROVED PRODUCTION SYNOPSIS</span><h2>Your decisions, gathered in one place</h2><p>Review the message, edit direction, and posting copy below. Use the edit links if anything needs to change.</p></div><b id="handoffReadiness">CHECKING</b></header>
           <div class="handoff-grid">
@@ -135,10 +135,10 @@
         </section>
         <section class="final-render-progress" id="finalRenderProgress" data-state="waiting"><div><span>FULL-QUALITY VIDEO</span><b id="finalRenderPercent">0%</b></div><h2 id="finalRenderTitle">The edited video render has not started</h2><p id="finalRenderCopy">Your upload, transcript, visual analysis, description, and approved direction are safe. A real Runway/render job still needs to be submitted.</p><i><span id="finalRenderBar" style="width:0%"></span></i></section>
         <div class="package-grid"><article><span>01</span><div><strong>Polished full video</strong><small id="finalVideoCopy">Waiting for a real full-quality render job.</small></div><b class="working" id="finalVideoStatus">NOT STARTED</b><button id="finalVideoPreview" disabled>Preview unavailable</button></article><article><span>02</span><div><strong>Video description</strong><small>Title, foundational Scripture, and up to two transcript-based paragraphs</small></div><b id="finalDescriptionStatus">AWAITING APPROVAL</b><button id="reviewFinalDescription">Review</button></article></div>
-        <div class="post-video-phase"><span>NEXT PHASE · AFTER FINAL VIDEO APPROVAL</span><strong>Create social clips from the completed master video</strong><p>Clip selection, reframing, captions, and small finishing tweaks will happen in a separate workspace after this full edit is approved.</p></div>
+        <div class="post-video-phase" id="nextProductionPhase" data-state="locked"><span id="nextPhaseStatus">LOCKED · APPROVE THE FINAL VIDEO FIRST</span><strong>Next: thumbnails and social-media clips</strong><p id="nextPhaseCopy">Once you approve the final video, thumbnail and clip production will unlock.</p></div>
         <div class="publish-note"><span>🔒</span><div><strong>Approval does not automatically publish</strong><p>After approval, you’ll choose where and when each item is published.</p></div></div>
         <div class="approval-bar final" id="renderStartBar"><div><span>START PRODUCTION</span><p><strong id="renderStartTitle">Checking your approvals…</strong><small id="renderStartCopy">The render can begin only after all three decisions above are approved and saved.</small></p></div><button class="approve-button" id="startFullRender" type="button" disabled>Start full video render</button></div>
-        <div class="approval-bar final" id="finalApprovalBar" hidden><div><span>FINAL VIDEO APPROVAL</span><p><strong id="finalApprovalTitle">Waiting for the actual full-video render.</strong><small id="finalApprovalCopy">This button unlocks only after the polished main video has a real reviewable file.</small></p></div><button class="approve-button" id="approveFinalPackage" disabled>Approve final video</button></div>
+        <div class="approval-bar final" id="finalApprovalBar"><div><span>FINAL VIDEO REVIEW</span><p><strong id="finalApprovalTitle">Waiting for the completed video.</strong><small id="finalApprovalCopy">When the render is ready, preview it above and choose approve or reject.</small></p></div><button class="outline-button" id="rejectFinalVideo" type="button" disabled>Reject &amp; delete edit</button><button class="approve-button" id="approveFinalPackage" disabled>Approve final video</button></div>
       </section>
     </main>
   </div>
@@ -158,5 +158,5 @@
     <audio id="deeAudio" hidden></audio>
   </aside>
   <div class="reading-modal" id="transcriptModal" hidden><button class="reading-modal-backdrop" type="button" aria-label="Close transcript"></button><section role="dialog" aria-modal="true" aria-labelledby="transcriptModalTitle"><header><div><span>FULL TRANSCRIPT</span><h2 id="transcriptModalTitle">Devotional transcript</h2></div><button id="closeTranscriptModal" type="button" aria-label="Close transcript">×</button></header><div class="reading-modal-body" id="transcriptModalBody"></div></section></div>
-  <script src="vendor/tus.min.js"></script><script src="workflow.js?v=20260720-production-render-start"></script><script src="voice-input.js?v=20260720-written-description"></script><script src="dee-agent.js?v=20260720-visual-analysis"></script><script src="session.js?v=20260720-planning"></script>
+  <script src="vendor/tus.min.js"></script><script src="workflow.js?v=20260721-final-review-v3"></script><script src="voice-input.js?v=20260720-written-description"></script><script src="dee-agent.js?v=20260720-visual-analysis"></script><script src="session.js?v=20260720-planning"></script>
 </body></html>
