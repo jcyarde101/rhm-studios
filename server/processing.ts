@@ -9,6 +9,7 @@ import ffmpeg from '@ffmpeg-installer/ffmpeg';
 import { Upload } from 'tus-js-client';
 import { config } from './config.js';
 import { adminClient } from './supabase.js';
+import { generateRunwayBroll } from './runway.js';
 
 const openaiApiKey = config.openaiApiKey;
 const mediaBucket = 'devotional-media';
@@ -30,6 +31,22 @@ type VisualObservation = {
   timestamp: string; framing: string; lighting: string; speakerPresence: string; gestureExpression: string;
   onScreenText: string; qualityIssues: string[]; editOpportunities: string[];
 };
+
+type DirectionScene = { sourceRange?: string; purpose?: string; runwayTool?: string; prompt?: string; extraMotion?: string; placement?: string };
+
+function parseFirstTimestamp(value = '') {
+  const match = value.match(/(?:(\d{1,2}):)?(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  return Number(match[1] || 0) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+}
+
+function explicitlyIncludesAsset(direction: string, asset: 'intro' | 'outro') {
+  return new RegExp(`\\b(?:add|include|use|prepend|append)\\b[^.]{0,60}\\b${asset}\\b`, 'i').test(direction);
+}
+
+function escapeDrawtext(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/%/g, '\\%').slice(0, 110);
+}
 
 function exactTimestamp(seconds: number) {
   const value = Math.max(0, Math.round(seconds));
@@ -90,11 +107,16 @@ async function processFullRenderJob(job: { id: string; devotional_id: string; ow
   const workDirectory = await mkdtemp(path.join(tmpdir(), 'rhm-full-render-'));
   try {
     await updateJob(jobId, { status: 'running', progress: 3, started_at: new Date().toISOString(), error_message: null });
-    const [{ data: project }, { data: asset }] = await Promise.all([
+    const [{ data: project }, { data: asset }, { data: directionStage }] = await Promise.all([
       adminClient.from('devotionals').select('id,title,primary_scripture,duration_seconds').eq('id', devotionalId).eq('owner_id', ownerId).maybeSingle(),
-      adminClient.from('media_assets').select('id,storage_path').eq('devotional_id', devotionalId).eq('owner_id', ownerId).eq('kind', 'source_video').maybeSingle()
+      adminClient.from('media_assets').select('id,storage_path').eq('devotional_id', devotionalId).eq('owner_id', ownerId).eq('kind', 'source_video').maybeSingle(),
+      adminClient.from('workflow_stages').select('notes,status').eq('devotional_id', devotionalId).eq('owner_id', ownerId).eq('stage', 'video_direction').maybeSingle()
     ]);
     if (!project || !asset?.storage_path) throw new Error('The source video could not be found for rendering.');
+    if (directionStage?.status !== 'approved' || !directionStage.notes) throw new Error('The approved video direction could not be found for rendering.');
+    let direction: any;
+    try { direction = JSON.parse(directionStage.notes)?.plan; } catch { throw new Error('The approved video direction is not valid JSON.'); }
+    if (!direction?.scenes?.length) throw new Error('The approved video direction contains no edit scenes; refusing to produce an unchanged video.');
     const { data: signed, error: signedError } = await adminClient.storage.from(mediaBucket).createSignedUrl(asset.storage_path, 8 * 60 * 60);
     if (signedError || !signed?.signedUrl) throw new Error('A private source-video link could not be prepared.');
 
@@ -102,7 +124,9 @@ async function processFullRenderJob(job: { id: string; devotional_id: string; ow
     const outroPath = path.join(projectRoot, 'assets', 'brand', 'outros', 'rhm-default-outro.mp4');
     const logoPath = path.join(projectRoot, 'assets', 'rhm-logo.png');
     const outputPath = path.join(workDirectory, 'rhm-polished-master.mp4');
-    const totalSeconds = Math.max(83, Number(project.duration_seconds || 0) + 83);
+    const includeIntro = explicitlyIncludesAsset(String(direction.brandDirection || ''), 'intro');
+    const includeOutro = explicitlyIncludesAsset(String(direction.brandDirection || ''), 'outro');
+    const totalSeconds = Number(project.duration_seconds || 0);
     const introOutput = path.join(workDirectory, '01-intro.mp4');
     const sourceOutput = path.join(workDirectory, '02-source.mp4');
     const outroOutput = path.join(workDirectory, '03-outro.mp4');
@@ -112,25 +136,54 @@ async function processFullRenderJob(job: { id: string; devotional_id: string; ow
     const videoFilter = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,fps=30,format=yuv420p`;
     const commonOutput = ['-c:v', 'libx264', '-preset', companionMode ? 'fast' : 'veryfast', '-crf', companionMode ? '20' : '22', '-profile:v', 'main', '-level', companionMode ? '4.1' : '3.1', '-g', '60', '-c:a', 'aac', '-b:a', companionMode ? '192k' : '128k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart'];
 
-    await runFfmpegStage(['-i', introPath, '-vf', videoFilter, '-af', 'aformat=sample_rates=48000:channel_layouts=stereo', ...commonOutput, introOutput]);
-    await updateJob(jobId, { progress: 9 });
+    if (includeIntro) await runFfmpegStage(['-i', introPath, '-vf', videoFilter, '-af', 'aformat=sample_rates=48000:channel_layouts=stereo', ...commonOutput, introOutput]);
+    await updateJob(jobId, { progress: 7 });
 
-    let lastProgress = 9;
-    const sourceFilter = `[0:v]${videoFilter}[base];[1:v]scale=72:-1,format=rgba,colorchannelmixer=aa=0.82[wm];[base][wm]overlay=W-w-18:H-h-18[v]`;
+    const brollScenes = (direction.scenes as DirectionScene[]).filter(scene => /b-?roll/i.test(String(scene.runwayTool)));
+    if (!brollScenes.length) throw new Error('The approved direction has no Runway B-roll scenes; refusing to report a Runway render that made no Runway calls.');
+    const runwayClips: Array<{ path: string; start: number; duration: number; label: string; taskId: string }> = [];
+    for (let index = 0; index < brollScenes.length; index += 1) {
+      const scene = brollScenes[index];
+      const start = parseFirstTimestamp(scene.placement || '') ?? parseFirstTimestamp(scene.sourceRange || '');
+      if (start === null) throw new Error(`Runway scene ${index + 1} has no usable placement timestamp.`);
+      const generated = await generateRunwayBroll([scene.prompt, scene.extraMotion].filter(Boolean).join(' '), 5);
+      const clipPath = path.join(workDirectory, `runway-${String(index + 1).padStart(2, '0')}.mp4`);
+      const clipResponse = await fetch(generated.url);
+      if (!clipResponse.ok) throw new Error(`Runway output ${generated.taskId} could not be downloaded (${clipResponse.status}).`);
+      await writeFile(clipPath, Buffer.from(await clipResponse.arrayBuffer()));
+      runwayClips.push({ path: clipPath, start, duration: 5, label: String(scene.purpose || 'Supporting visual'), taskId: generated.taskId });
+      await updateJob(jobId, { progress: 8 + Math.floor(((index + 1) / brollScenes.length) * 30) });
+    }
+
+    let lastProgress = 38;
+    const inputs = ['-i', signed.signedUrl, ...runwayClips.flatMap(clip => ['-i', clip.path]), '-loop', '1', '-i', logoPath];
+    const filters = [`[0:v]${videoFilter}[base]`];
+    let current = 'base';
+    runwayClips.forEach((clip, index) => {
+      const prepared = `broll${index}`;
+      const overlaid = `edit${index}`;
+      filters.push(`[${index + 1}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setpts=PTS-STARTPTS+${clip.start}/TB[${prepared}]`);
+      filters.push(`[${current}][${prepared}]overlay=0:0:enable='between(t,${clip.start},${clip.start + clip.duration})':eof_action=pass,drawtext=text='${escapeDrawtext(clip.label)}':x=(w-text_w)/2:y=h-150:fontsize=42:fontcolor=white:borderw=3:bordercolor=black@0.75:enable='between(t,${clip.start},${clip.start + clip.duration})'[${overlaid}]`);
+      current = overlaid;
+    });
+    const logoInput = runwayClips.length + 1;
+    filters.push(`[${logoInput}:v]scale=72:-1,format=rgba,colorchannelmixer=aa=0.82[wm]`);
+    filters.push(`[${current}][wm]overlay=W-w-18:H-h-18[v]`);
     await runFfmpegStage([
-      '-i', signed.signedUrl, '-loop', '1', '-i', logoPath, '-filter_complex', sourceFilter, '-map', '[v]', '-map', '0:a:0',
+      ...inputs, '-filter_complex', filters.join(';'), '-map', '[v]', '-map', '0:a:0',
       '-af', 'highpass=f=80,lowpass=f=14500,afftdn=nf=-25,acompressor=threshold=-18dB:ratio=2.5:attack=20:release=250,aformat=sample_rates=48000:channel_layouts=stereo',
       ...commonOutput, '-shortest', sourceOutput
     ], seconds => {
-      const progress = Math.min(82, 10 + Math.floor((seconds / Math.max(1, Number(project.duration_seconds || 1))) * 72));
+      const progress = Math.min(86, 38 + Math.floor((seconds / Math.max(1, Number(project.duration_seconds || 1))) * 48));
       if (progress >= lastProgress + 2) { lastProgress = progress; void updateJob(jobId, { progress }); }
     });
     await updateJob(jobId, { progress: 84 });
 
-    await runFfmpegStage(['-i', outroPath, '-vf', videoFilter, '-af', 'aformat=sample_rates=48000:channel_layouts=stereo', ...commonOutput, outroOutput]);
+    if (includeOutro) await runFfmpegStage(['-i', outroPath, '-vf', videoFilter, '-af', 'aformat=sample_rates=48000:channel_layouts=stereo', ...commonOutput, outroOutput]);
     await updateJob(jobId, { progress: 89 });
     const concatList = path.join(workDirectory, 'concat.txt');
-    await writeFile(concatList, [introOutput, sourceOutput, outroOutput].map(file => `file '${file.replace(/'/g, "'\\''")}'`).join('\n'), 'utf8');
+    const segments = [includeIntro ? introOutput : null, sourceOutput, includeOutro ? outroOutput : null].filter(Boolean) as string[];
+    await writeFile(concatList, segments.map(file => `file '${file.replace(/'/g, "'\\''")}'`).join('\n'), 'utf8');
     await runFfmpegStage(['-f', 'concat', '-safe', '0', '-i', concatList, '-c', 'copy', '-movflags', '+faststart', outputPath]);
 
     await updateJob(jobId, { progress: 92 });
@@ -140,7 +193,7 @@ async function processFullRenderJob(job: { id: string; devotional_id: string; ow
     const { error: assetError } = await adminClient.from('media_assets').insert({
       devotional_id: devotionalId, owner_id: ownerId, kind: 'enhanced_video', storage_path: storagePath,
       mime_type: 'video/mp4', size_bytes: sizeBytes, duration_seconds: totalSeconds,
-      metadata: { render_job_id: jobId, render_type: 'polished_master', render_worker: companionMode ? 'rhm-local-companion' : 'server', output_resolution: `${width}x${height}`, includes_intro: true, includes_outro: true, includes_audio_cleanup: true, includes_watermark: true, includes_scripture_graphic: false }
+      metadata: { render_job_id: jobId, render_type: 'polished_master', render_worker: companionMode ? 'rhm-local-companion' : 'server', output_resolution: `${width}x${height}`, includes_intro: includeIntro, includes_outro: includeOutro, includes_audio_cleanup: true, includes_watermark: true, includes_scripture_graphic: false, runway_task_ids: runwayClips.map(clip => clip.taskId), runway_broll_count: runwayClips.length, includes_on_screen_descriptions: true }
     });
     if (assetError) throw assetError;
     await updateJob(jobId, { status: 'completed', progress: 100, completed_at: new Date().toISOString() });

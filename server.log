@@ -1,0 +1,5 @@
+
+> rhm-studios@0.1.0 start
+> tsx server/index.ts
+
+RHM Studios running at http://localhost:4173
